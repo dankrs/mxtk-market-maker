@@ -1,1 +1,18 @@
-{"dailyVolume":0,"lastPrice":null,"activeOrders":{},"isCircuitBroken":false,"lastPriceUpdate":1739512095602,"recoveryAttempts":3,"wallets":[{"_isSigner":true,"address":"0x644D7784a674f375d260a54e85a0E980CC728446","provider":{"_isProvider":true,"_events":[],"_emitted":{"block":-2},"disableCcipRead":false,"formatter":{"formats":{"transaction":{},"transactionRequest":{},"receiptLog":{},"receipt":{},"block":{},"blockWithTransactions":{},"filter":{},"filterLog":{}}},"anyNetwork":false,"_network":{"name":"arbitrum","chainId":42161,"ensAddress":null,"_defaultProvider":null},"_maxInternalBlockNumber":-1024,"_lastBlockNumber":-2,"_maxFilterBlockRange":10,"_pollingInterval":4000,"_fastQueryDate":0,"connection":{"url":"https://arb1.arbitrum.io/rpc"},"_nextId":45,"_eventLoopCache":{"detectNetwork":null,"eth_chainId":null}}},{"_isSigner":true,"address":"0x9A23C6011fcCEbe0673F836A08D630C0D268748A","provider":{"_isProvider":true,"_events":[],"_emitted":{"block":-2},"disableCcipRead":false,"formatter":{"formats":{"transaction":{},"transactionRequest":{},"receiptLog":{},"receipt":{},"block":{},"blockWithTransactions":{},"filter":{},"filterLog":{}}},"anyNetwork":false,"_network":{"name":"arbitrum","chainId":42161,"ensAddress":null,"_defaultProvider":null},"_maxInternalBlockNumber":-1024,"_lastBlockNumber":-2,"_maxFilterBlockRange":10,"_pollingInterval":4000,"_fastQueryDate":0,"connection":{"url":"https://arb1.arbitrum.io/rpc"},"_nextId":45,"_eventLoopCache":{"detectNetwork":null,"eth_chainId":null}}},{"_isSigner":true,"address":"0xb14a18091fcCcd7097C8F6021eD5aBbAfDD5B5f3","provider":{"_isProvider":true,"_events":[],"_emitted":{"block":-2},"disableCcipRead":false,"formatter":{"formats":{"transaction":{},"transactionRequest":{},"receiptLog":{},"receipt":{},"block":{},"blockWithTransactions":{},"filter":{},"filterLog":{}}},"anyNetwork":false,"_network":{"name":"arbitrum","chainId":42161,"ensAddress":null,"_defaultProvider":null},"_maxInternalBlockNumber":-1024,"_lastBlockNumber":-2,"_maxFilterBlockRange":10,"_pollingInterval":4000,"_fastQueryDate":0,"connection":{"url":"https://arb1.arbitrum.io/rpc"},"_nextId":45,"_eventLoopCache":{"detectNetwork":null,"eth_chainId":null}}}]}
+{
+  "dailyVolume": 0,
+  "lastPrice": null,
+  "isCircuitBroken": false,
+  "lastPriceUpdate": 1739514632326,
+  "recoveryAttempts": 3,
+  "wallets": [
+    {
+      "address": "0x355dB07cCd68781BB7C5246Feb25D495c3d7A2b4"
+    },
+    {
+      "address": "0xB2F931B6953c2D1B9D42911047c2C3CFc0EeC532"
+    },
+    {
+      "address": "0xE4391c89047354B4Ed51447161eF3B4c0DF71CF0"
+    }
+  ]
+}

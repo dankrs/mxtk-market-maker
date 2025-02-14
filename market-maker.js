@@ -23,8 +23,8 @@ class MXTKMarketMaker {
         // Token and router addresses for Arbitrum
         this.MXTK_ADDRESS = '0x3e4ffeb394b371aaaa0998488046ca19d870d9ba';
         this.WETH_ADDRESS = '0x82af49447d8a07e3bd95bd0d56f35241523fbab1';  // Arbitrum WETH
-        this.UNISWAP_V2_ROUTER = '0x1b02da8cb0d097eb8d57a175b88c7d8b47997506'; // SushiSwap on Arbitrum
-        this.SUSHISWAP_FACTORY = '0xc35DADB65012eC5796536bD9864eD8773aBc74C4'; // SushiSwap Factory on Arbitrum
+        this.UNISWAP_V2_ROUTER = '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45'; // Uniswap Router on Arbitrum
+        this.UNISWAP_V2_FACTORY = '0x1F98431c8aD98523631AE4a59f267346ea31F984'; // Uniswap Factory on Arbitrum
         
         // Merge custom configuration with defaults
         this.config = {
@@ -139,18 +139,27 @@ class MXTKMarketMaker {
     }
 
     async sendAlert(type, message) {
-        // Define the alert email details
-        const alert = {
-            from: process.env.ALERT_FROM_EMAIL,
-            to: process.env.ALERT_TO_EMAIL,
-            subject: `MXTK Market Maker Alert: ${type}`,
-            text: message
-        };
-
         try {
+            if (!this.mailer) {
+                console.warn('Email alerts not configured - skipping alert:', type);
+                return;
+            }
+
+            const alert = {
+                from: process.env.ALERT_FROM_EMAIL,
+                to: process.env.ALERT_TO_EMAIL,
+                subject: `MXTK Market Maker Alert: ${type}`,
+                text: message,
+                html: `<h2>MXTK Market Maker Alert: ${type}</h2>
+                       <pre>${message}</pre>
+                       <p>Time: ${new Date().toISOString()}</p>`
+            };
+
             await this.mailer.sendMail(alert);
+            console.log(`Alert sent: ${type}`);
         } catch (error) {
             console.error('Failed to send alert:', error);
+            // Don't throw the error, just log it
         }
     }
 
@@ -208,38 +217,61 @@ class MXTKMarketMaker {
 
     async getCurrentPrice() {
         try {
-            // 1) Instantiate the SushiSwap factory on Arbitrum
+            // 1) Instantiate the Uniswap factory on Arbitrum
             const factory = new ethers.Contract(
-                this.SUSHISWAP_FACTORY,
-                ['function getPair(address, address) external view returns (address)'],
+                this.UNISWAP_V2_FACTORY,
+                ['function getPool(address,address,uint24) external view returns (address)'],
                 this.provider
             );
 
-            // 2) Get the pair address (MXTK-WETH). If it's zero, no liquidity pool exists
-            const pairAddress = await factory.getPair(this.MXTK_ADDRESS, this.WETH_ADDRESS);
-            if (pairAddress === ethers.constants.AddressZero) {
-                console.warn('No MXTK–WETH pair found on SushiSwap. Skipping price update.');
+            // 2) Get the pool address (MXTK-WETH). Using 0.3% fee tier (3000)
+            const poolAddress = await factory.getPool(this.MXTK_ADDRESS, this.WETH_ADDRESS, 3000);
+            if (poolAddress === ethers.constants.AddressZero) {
+                const message = 'No MXTK–WETH pool found on Uniswap. The pool needs to be created before trading can begin.';
+                console.warn(message);
+                
+                // Send email alert about missing pool
+                await this.sendAlert(
+                    'Missing Liquidity Pool',
+                    `WARNING: ${message}\n\n` +
+                    `MXTK Address: ${this.MXTK_ADDRESS}\n` +
+                    `WETH Address: ${this.WETH_ADDRESS}\n` +
+                    `Factory Address: ${this.UNISWAP_V2_FACTORY}\n\n` +
+                    'Action Required: A liquidity pool needs to be created on Uniswap V2 for MXTK-WETH pair.'
+                );
+                
+                // Return null but don't throw an error
                 return null;
             }
 
-            // 3) Check liquidity reserves in that pair
-            const pairContract = new ethers.Contract(
-                pairAddress,
-                ['function getReserves() external view returns (uint112,uint112,uint32)'],
+            // 3) Check liquidity in the pool
+            const poolContract = new ethers.Contract(
+                poolAddress,
+                ['function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)'],
                 this.provider
             );
-            const [reserve0, reserve1] = await pairContract.getReserves();
-            if (reserve0.eq(0) || reserve1.eq(0)) {
-                console.warn('MXTK–WETH pair has zero reserves. Skipping price update.');
+            
+            const slot0 = await poolContract.slot0();
+            if (slot0.sqrtPriceX96.eq(0)) {
+                const message = 'MXTK–WETH pool exists but has zero liquidity. Trading cannot begin until liquidity is added.';
+                console.warn(message);
+                
+                // Send email alert about zero liquidity
+                await this.sendAlert(
+                    'Zero Liquidity in Pool',
+                    `WARNING: ${message}\n\n` +
+                    `Pool Address: ${poolAddress}\n` +
+                    `MXTK Address: ${this.MXTK_ADDRESS}\n` +
+                    `WETH Address: ${this.WETH_ADDRESS}\n\n` +
+                    'Action Required: Liquidity needs to be added to the MXTK-WETH pool on Uniswap V2.'
+                );
+                
                 return null;
             }
 
-            // 4) If the pair exists and has liquidity, safely call getAmountsOut
-            const amounts = await this.router.getAmountsOut(
-                ethers.utils.parseEther('1'),
-                [this.MXTK_ADDRESS, this.WETH_ADDRESS]
-            );
-            return ethers.utils.formatEther(amounts[1]);
+            // 4) Calculate price from sqrtPriceX96
+            const price = (Number(slot0.sqrtPriceX96) / (2 ** 96)) ** 2;
+            return price.toString();
         } catch (error) {
             console.error('Error getting current price:', error);
             await this.handleError(error);
@@ -338,42 +370,33 @@ class MXTKMarketMaker {
                 ? [this.WETH_ADDRESS, this.MXTK_ADDRESS]
                 : [this.MXTK_ADDRESS, this.WETH_ADDRESS];
 
-            // Check token balances and approvals first
-            const tokenContract = new ethers.Contract(
-                path[0],
-                IERC20.abi,
-                wallet
-            );
-            
-            const balance = await tokenContract.balanceOf(wallet.address);
-            const amountIn = ethers.utils.parseEther(amount.toString());
-            
-            if (balance.lt(amountIn)) {
-                console.log(`Insufficient ${isBuy ? 'WETH' : 'MXTK'} balance for order`);
-                return;
-            }
+            // Create exact input single params
+            const params = {
+                tokenIn: path[0],
+                tokenOut: path[1],
+                fee: 3000, // 0.3% fee tier
+                recipient: wallet.address,
+                deadline: Math.floor(Date.now() / 1000) + 300,
+                amountIn: ethers.utils.parseEther(amount.toString()),
+                amountOutMinimum: 0, // We'll calculate this
+                sqrtPriceLimitX96: 0 // No limit
+            };
 
-            const allowance = await tokenContract.allowance(wallet.address, this.UNISWAP_V2_ROUTER);
-            if (allowance.lt(amountIn)) {
-                console.log(`Approving ${isBuy ? 'WETH' : 'MXTK'} for trading...`);
-                const approveTx = await tokenContract.approve(
-                    this.UNISWAP_V2_ROUTER,
-                    ethers.constants.MaxUint256
-                );
-                await approveTx.wait();
-                console.log('Approval successful');
-            }
+            // Get quote first
+            const amounts = await this.router.connect(wallet).quoteExactInputSingle([
+                params.tokenIn,
+                params.tokenOut,
+                params.amountIn,
+                params.fee,
+                params.sqrtPriceLimitX96
+            ]);
 
-            const deadline = Math.floor(Date.now() / 1000) + 300;
-            const amounts = await this.router.getAmountsOut(amountIn, path);
-            const amountOutMin = amounts[1].mul(98).div(100); // 2% slippage
+            // Set minimum output amount with 2% slippage
+            params.amountOutMinimum = amounts.amountOut.mul(98).div(100);
 
-            const tx = await this.router.connect(wallet).swapExactTokensForTokens(
-                amountIn,
-                amountOutMin,
-                path,
-                wallet.address,
-                deadline,
+            // Execute the swap
+            const tx = await this.router.connect(wallet).exactInputSingle(
+                params,
                 {
                     gasLimit: 300000,
                     gasPrice: await this.provider.getGasPrice()
@@ -413,14 +436,26 @@ class MXTKMarketMaker {
 
     async saveState() {
         try {
-            fs.writeFileSync(
+            // Create a clean state object without circular references
+            const cleanState = {
+                dailyVolume: this.state.dailyVolume,
+                lastPrice: this.state.lastPrice,
+                isCircuitBroken: this.state.isCircuitBroken,
+                lastPriceUpdate: this.state.lastPriceUpdate,
+                recoveryAttempts: this.state.recoveryAttempts,
+                wallets: this.state.wallets.map(w => ({
+                    address: w.address,
+                    balance: w.balance
+                }))
+            };
+
+            await fs.promises.writeFile(
                 this.config.recoveryFile,
-                JSON.stringify(this.state),
-                'utf8'
+                JSON.stringify(cleanState, null, 2)
             );
         } catch (error) {
             console.error('Error saving state:', error);
-            await this.sendAlert('State Save Error', error.message);
+            // Don't throw the error, just log it
         }
     }
 
