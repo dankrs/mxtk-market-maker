@@ -1,6 +1,6 @@
 # MXTK Market Maker Bot
 
-A professional market making bot designed for the MXTK token on Arbitrum, using SushiSwap for trading. The bot manages multiple wallets, implements safety features like circuit breakers, and includes monitoring and alert systems.
+A professional market making bot designed for the MXTK token on Arbitrum, using Uniswap for trading. The bot manages multiple wallets, implements safety features like circuit breakers, and includes monitoring and alert systems.
 
 ## Features
 
