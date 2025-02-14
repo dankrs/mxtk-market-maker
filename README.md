@@ -78,12 +78,7 @@ The market maker can be configured through environment variables and the constru
 Start the market maker:
 
 ```bash
-npm start
-```
-
-Monitor status via the HTTP endpoint:
-```bash
-curl http://localhost:3000/status
+node index.js
 ```
 
 ## Architecture
