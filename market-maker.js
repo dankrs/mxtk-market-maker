@@ -16,7 +16,7 @@ const nodemailer = require('nodemailer');
 const cluster = require('cluster');
 const fs = require('fs');
 const path = require('path');
-const { WalletManager } = require('./wallet-manager');
+const WalletManager = require('./wallet-manager');
 
 class MXTKMarketMaker {
     constructor(config) {
@@ -712,6 +712,55 @@ class MXTKMarketMaker {
                         ethers.utils.formatUnits(error.transaction.gasPrice, 'gwei') + ' gwei' : 'unknown'
                 });
             }
+            throw error;
+        }
+    }
+
+    async startProcessManager() {
+        try {
+            console.log('Starting process manager...');
+            
+            // Check if pool exists before starting
+            const currentPrice = await this.getCurrentPrice();
+            if (!currentPrice) {
+                console.log('Cannot start process manager: No MXTK-USDT pool exists');
+                console.log('Please create the pool first and then restart the bot');
+                return;
+            }
+
+            // Start the main trading loop
+            this.isRunning = true;
+            
+            // Set up interval for continuous trading
+            this.processInterval = setInterval(async () => {
+                if (!this._isUpdating && !this.state.isCircuitBroken) {
+                    try {
+                        // Get random wallet from pool
+                        const wallet = this.state.wallets[Math.floor(Math.random() * this.state.wallets.length)];
+                        
+                        // Randomly decide buy or sell
+                        const isBuy = Math.random() > 0.5;
+                        
+                        // Get random amount within configured range
+                        const amount = this.getRandomAmount();
+                        
+                        // Create the order
+                        await this.createOrder(wallet, amount, isBuy);
+                        
+                        // Random delay before next trade
+                        const delay = this.getRandomDelay();
+                        console.log(`Next trade in ${delay} seconds`);
+                        
+                    } catch (error) {
+                        console.error('Error in trading cycle:', error);
+                        await this.handleError(error);
+                    }
+                }
+            }, this.config.timeRange.min * 1000);
+
+            console.log('Process manager started successfully');
+        } catch (error) {
+            console.error('Error starting process manager:', error);
             throw error;
         }
     }

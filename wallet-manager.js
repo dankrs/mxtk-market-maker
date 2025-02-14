@@ -31,7 +31,6 @@ class WalletManager {
             for (const file of files) {
                 if (file.endsWith('.json')) {
                     const data = JSON.parse(fs.readFileSync(path.join(this.dataDir, file), 'utf8'));
-                    // Create a wallet instance from the private key
                     const wallet = new ethers.Wallet(data.privateKey);
                     this.wallets.push(wallet);
                 }
@@ -50,13 +49,16 @@ class WalletManager {
         try {
             const wallet = ethers.Wallet.createRandom();
             this.wallets.push(wallet);
-            // Save the wallet to a file named after its address
+            
+            // Save wallet data in plain text JSON
             const filePath = path.join(this.dataDir, `${wallet.address}.json`);
             const data = {
                 address: wallet.address,
                 privateKey: wallet.privateKey
             };
-            fs.writeFileSync(filePath, JSON.stringify(data), 'utf8');
+            
+            // Write to file in plain text
+            fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
             console.log(`Created new wallet: ${wallet.address}`);
             return wallet;
         } catch (error) {
@@ -72,6 +74,17 @@ class WalletManager {
     getAllWallets() {
         return this.wallets;
     }
+
+    async getWalletPrivateKey(address) {
+        try {
+            const filePath = path.join(this.dataDir, `${address}.json`);
+            const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            return data.privateKey;
+        } catch (error) {
+            console.error(`Error getting private key for wallet ${address}:`, error);
+            throw error;
+        }
+    }
 }
 
-module.exports = { WalletManager };
+module.exports = WalletManager;

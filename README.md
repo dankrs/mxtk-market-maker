@@ -4,21 +4,39 @@ A professional market making bot designed for the MXTK token on Arbitrum, using 
 
 ## Features
 
-- **Multi-Wallet Management**: Secure creation and management of trading wallets
-- **Automated Trading**: Creates buy and sell orders with configurable parameters
+- **Natural Trading Patterns**:
+  - Random wallet selection for trade distribution
+  - Alternating buy/sell orders with random sizing
+  - Variable delays between trades
+  - Dynamic behavior adjustment based on market conditions
+
+- **Advanced Trading Features**:
+  - 2% slippage protection on all trades
+  - Dynamic spread adjustment based on volatility
+  - Gas optimization with automatic price adjustment
+  - Configurable trade amount ranges
+  
+- **Multi-Wallet Management**:
+  - Secure creation and management of trading wallets
+  - Random wallet selection for each trade
+  - Balance monitoring across all wallets
+  
 - **Safety Mechanisms**:
-  - Circuit breaker for volatile market conditions
+  - Circuit breaker (10% price movement threshold)
   - Daily volume limits
-  - Balance monitoring
-  - Spread adjustment based on volatility
+  - Dynamic spread adjustment based on volatility
+  - Comprehensive error handling and recovery
+
+- **Gas Optimization**:
+  - Automatic gas price adjustment
+  - Configurable gas limits
+  - Transaction optimization
+
 - **Monitoring & Alerts**:
   - Email notifications for critical events
   - Status endpoint for monitoring
   - Balance and price monitoring
-- **Recovery System**:
-  - Automatic error recovery
-  - State persistence
-  - Configurable retry mechanisms
+  - Trading pattern analytics
 
 ## Prerequisites
 
@@ -36,13 +54,13 @@ git clone [repository-url]
 cd mxtk-market-maker
 ```
 
-2. Install dependencies:
+2.Install dependencies:
 
 ```bash
 npm install
 ```
 
-3. Create a `.env` file based on the provided template:
+3.Create a `.env` file based on the provided template:
 
 ```env
 # Network configuration
