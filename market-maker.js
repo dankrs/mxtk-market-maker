@@ -24,28 +24,33 @@ class MXTKMarketMaker {
         this.MXTK_ADDRESS = '0x3e4ffeb394b371aaaa0998488046ca19d870d9ba';
         this.USDT_ADDRESS = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9';  // Arbitrum USDT
         
-        this.UNISWAP_V2_ROUTER = '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45'; // Uniswap Router on Arbitrum
-        this.UNISWAP_V2_FACTORY = '0x1F98431c8aD98523631AE4a59f267346ea31F984'; // Uniswap Factory on Arbitrum
+        this.UNISWAP_V2_ROUTER = '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45';
+        this.UNISWAP_V2_FACTORY = '0x1F98431c8aD98523631AE4a59f267346ea31F984';
         
-        // Merge custom configuration with defaults
+        // Merge custom configuration with defaults from environment
         this.config = {
             ...config,
             recoveryFile: path.join(__dirname, 'recovery.json'),
             maxRetries: 3,
             retryDelay: 5000,
-            minSpread: 0.02,
-            targetSpread: 0.015,
-            maxSpread: 0.025,
+            minSpread: parseFloat(process.env.MIN_SPREAD) || 0.02,
+            targetSpread: parseFloat(process.env.TARGET_SPREAD) || 0.015,
+            maxSpread: parseFloat(process.env.MAX_SPREAD) || 0.025,
             minOrders: 10,
-            circuitBreakerThreshold: 0.10, // 10% price change triggers circuit breaker
+            maxDailyVolume: parseFloat(process.env.MAX_DAILY_VOLUME) || 10,
+            circuitBreakerThreshold: parseFloat(process.env.CIRCUIT_BREAKER_THRESHOLD) || 0.10,
+            lowBalanceThreshold: parseFloat(process.env.LOW_BALANCE_THRESHOLD) || 0.1,
+            volumeAlertThreshold: parseFloat(process.env.VOLUME_ALERT_THRESHOLD) || 0.8,
             timeRange: {
-                min: 60,
-                max: 900
+                min: parseInt(process.env.MIN_TIME_DELAY) || 60,
+                max: parseInt(process.env.MAX_TIME_DELAY) || 900
             },
             amountRange: {
-                min: 0.05,
-                max: 1
-            }
+                min: parseFloat(process.env.MIN_TRADE_AMOUNT) || 0.05,
+                max: parseFloat(process.env.MAX_TRADE_AMOUNT) || 1
+            },
+            gasLimit: parseInt(process.env.GAS_LIMIT) || 300000,
+            maxGasPrice: parseInt(process.env.MAX_GAS_PRICE) || 100
         };
 
         // Flag for tracking update operations
@@ -361,8 +366,21 @@ class MXTKMarketMaker {
     }
 
     async createOrder(wallet, amount, isBuy) {
+        // Check circuit breaker
         if (this.state.isCircuitBroken) {
             console.log('Order rejected: Circuit breaker active');
+            return;
+        }
+
+        // Check daily volume limit
+        if (this.state.dailyVolume + amount > this.config.maxDailyVolume) {
+            console.log(`Order rejected: Would exceed daily volume limit of ${this.config.maxDailyVolume}`);
+            
+            // Send alert if approaching volume limit
+            if (this.state.dailyVolume >= this.config.maxDailyVolume * this.config.volumeAlertThreshold) {
+                await this.sendAlert('Volume Limit Warning',
+                    `Daily volume (${this.state.dailyVolume}) is approaching the limit (${this.config.maxDailyVolume})`);
+            }
             return;
         }
 
@@ -409,7 +427,7 @@ class MXTKMarketMaker {
             const tx = await this.router.connect(wallet).exactInputSingle(
                 params,
                 {
-                    gasLimit: 300000,
+                    gasLimit: this.config.gasLimit,
                     gasPrice: await this.provider.getGasPrice()
                 }
             );
@@ -627,13 +645,15 @@ class MXTKMarketMaker {
                 throw new Error('Insufficient ETH balance for approvals');
             }
 
-            // Get current gas price and add 20% to ensure transaction goes through
-            const gasPrice = (await this.provider.getGasPrice()).mul(120).div(100);
-            console.log(`Using gas price: ${ethers.utils.formatUnits(gasPrice, 'gwei')} gwei`);
+            // Get current gas price and check against max
+            const currentGasPrice = await this.provider.getGasPrice();
+            if (currentGasPrice.gt(ethers.utils.parseUnits(this.config.maxGasPrice.toString(), 'gwei'))) {
+                throw new Error(`Current gas price ${ethers.utils.formatUnits(currentGasPrice, 'gwei')} gwei exceeds maximum ${this.config.maxGasPrice} gwei`);
+            }
 
             const overrides = {
                 gasLimit: 500000, // Increased gas limit for Arbitrum
-                gasPrice: gasPrice,
+                gasPrice: currentGasPrice,
                 nonce: await this.provider.getTransactionCount(wallet.address)
             };
 

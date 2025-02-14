@@ -65,10 +65,57 @@ npm install
 ```env
 # Network configuration
 NETWORK=mainnet
+# Mainnet RPC endpoint
 ARBITRUM_MAINNET_RPC=https://arb1.arbitrum.io/rpc
+# Testnet RPC endpoint (for testing)
+ARBITRUM_TESTNET_RPC=https://sepolia-rollup.arbitrum.io/rpc
 
 # API Keys
 MORALIS_API_KEY=your_moralis_api_key
+
+# Trading Parameters
+MAX_DAILY_VOLUME=10                      # Maximum MXTK tokens that can be traded in 24 hours
+                                         # Bot stops trading when this limit is reached
+                                         # Resets at UTC midnight
+
+CIRCUIT_BREAKER_THRESHOLD=0.1            # If price moves by 10% (0.1), trading halts
+                                         # Protects against sudden market movements
+                                         # Trading resumes after 15 minutes if price stabilizes
+
+LOW_BALANCE_THRESHOLD=0.1                # Minimum ETH balance (in ETH) for each wallet
+                                         # Triggers alert when wallet balance falls below this
+                                         # Used to ensure wallets have enough ETH for gas
+
+VOLUME_ALERT_THRESHOLD=0.8               # Alerts when daily volume reaches 80% (0.8) of MAX_DAILY_VOLUME
+                                         # Early warning system for volume limits
+                                         # Example: Alert at 8 MXTK if MAX_DAILY_VOLUME is 10
+
+# Trading Ranges
+MIN_TRADE_AMOUNT=0.05                    # Minimum amount of MXTK per trade
+MAX_TRADE_AMOUNT=1.0                     # Maximum amount of MXTK per trade
+                                         # Bot randomly selects amount between these values
+                                         # Helps create natural trading patterns
+
+MIN_TIME_DELAY=60                        # Minimum seconds between trades (1 minute)
+MAX_TIME_DELAY=900                       # Maximum seconds between trades (15 minutes)
+                                         # Bot randomly waits between these times
+                                         # Prevents predictable trading patterns
+
+# Spread Configuration
+MIN_SPREAD=0.02                          # Minimum acceptable price spread (2%)
+TARGET_SPREAD=0.015                      # Target price spread for trades (1.5%)
+MAX_SPREAD=0.025                         # Maximum acceptable price spread (2.5%)
+                                         # Bot adjusts orders based on these spreads
+                                         # Helps maintain market liquidity
+
+# Gas Configuration
+MAX_GAS_PRICE=100                        # Maximum gas price in GWEI
+                                         # Bot won't trade if gas price exceeds this
+                                         # Prevents trading during high gas periods
+
+GAS_LIMIT=300000                         # Maximum gas units per transaction
+                                         # Safety limit for transaction execution
+                                         # Prevents unexpectedly high gas usage
 
 # SMTP Configuration
 SMTP_HOST=smtp.gmail.com
@@ -80,114 +127,6 @@ SMTP_PASS=your_smtp_password
 ALERT_FROM_EMAIL=your_email@gmail.com
 ALERT_TO_EMAIL=your_email@gmail.com
 
-# Wallet Configuration
+# Master Wallet Configuration
 MASTER_WALLET_PRIVATE_KEY=your_master_wallet_private_key
 ```
-
-## Configuration
-
-The market maker can be configured through environment variables and the constructor config object in `market-maker.js`. Key configuration parameters include:
-
-- `maxDailyVolume`: Maximum trading volume per day
-- `circuitBreakerThreshold`: Price change threshold for halting trading
-- `timeRange`: Min/max delay between trades
-- `amountRange`: Min/max trade amounts
-- `minSpread/maxSpread`: Trading spread limits
-
-## Usage
-
-Start the market maker:
-
-```bash
-node index.js
-```
-
-## Architecture
-
-### Key Components
-
-1. **WalletManager (`wallet-manager.js`)**
-   - Manages wallet creation and storage
-   - Handles secure storage of private keys
-   - Provides wallet loading and retrieval
-
-2. **MarketMaker (`market-maker.js`)**
-   - Core trading logic
-   - Price monitoring and circuit breaker
-   - Order creation and execution
-   - State management and recovery
-
-3. **API Server (`index.js`)**
-   - Status endpoint
-   - Health monitoring
-
-### Security Features
-
-- Secure wallet storage
-- Circuit breaker protection
-- Balance monitoring
-- Error recovery system
-- Email alerts for critical events
-
-## Monitoring
-
-The bot provides several monitoring features:
-
-1. **Status Endpoint** (`/status`):
-   - Current trading status
-   - Daily volume
-   - Circuit breaker status
-   - Last price and update time
-
-2. **Email Alerts**:
-   - Low balance warnings
-   - Circuit breaker activation
-   - Error notifications
-   - Trading anomalies
-
-## Development
-
-### Project Structure
-
-```
-├── index.js           # Entry point and API server
-├── market-maker.js    # Core market making logic
-├── wallet-manager.js  # Wallet management system
-├── .env              # Environment configuration
-└── recovery.json     # State persistence file
-```
-
-### Adding New Features
-
-1. Fork the repository
-2. Create a feature branch
-3. Implement changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## Troubleshooting
-
-Common issues and solutions:
-
-1. **Connection Issues**:
-   - Verify RPC endpoint in `.env`
-   - Check network connectivity
-   - Ensure sufficient ETH for gas
-
-2. **Wallet Issues**:
-   - Verify master wallet private key
-   - Check wallet balances
-   - Ensure proper permissions
-
-3. **Trading Issues**:
-   - Check circuit breaker status
-   - Verify token approvals
-   - Monitor gas prices
-
-## License
-
-ICS
-
-## Support
-
-For support, please [create an issue](https://github.com/yourusername/mxtk-market-maker/issues)
