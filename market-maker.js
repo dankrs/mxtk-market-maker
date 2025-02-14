@@ -20,9 +20,10 @@ const { WalletManager } = require('./wallet-manager');
 
 class MXTKMarketMaker {
     constructor(config) {
-        // Token and router addresses for Arbitrum
+        // Token addresses for Arbitrum
         this.MXTK_ADDRESS = '0x3e4ffeb394b371aaaa0998488046ca19d870d9ba';
-        this.WETH_ADDRESS = '0x82af49447d8a07e3bd95bd0d56f35241523fbab1';  // Arbitrum WETH
+        this.USDT_ADDRESS = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9';  // Arbitrum USDT
+        
         this.UNISWAP_V2_ROUTER = '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45'; // Uniswap Router on Arbitrum
         this.UNISWAP_V2_FACTORY = '0x1F98431c8aD98523631AE4a59f267346ea31F984'; // Uniswap Factory on Arbitrum
         
@@ -224,10 +225,10 @@ class MXTKMarketMaker {
                 this.provider
             );
 
-            // 2) Get the pool address (MXTK-WETH). Using 0.3% fee tier (3000)
-            const poolAddress = await factory.getPool(this.MXTK_ADDRESS, this.WETH_ADDRESS, 3000);
+            // 2) Get the pool address (MXTK-USDT). Using 0.3% fee tier (3000)
+            const poolAddress = await factory.getPool(this.MXTK_ADDRESS, this.USDT_ADDRESS, 3000);
             if (poolAddress === ethers.constants.AddressZero) {
-                const message = 'No MXTK–WETH pool found on Uniswap. The pool needs to be created before trading can begin.';
+                const message = 'No MXTK–USDT pool found on Uniswap. The pool needs to be created before trading can begin.';
                 console.warn(message);
                 
                 // Send email alert about missing pool
@@ -235,9 +236,9 @@ class MXTKMarketMaker {
                     'Missing Liquidity Pool',
                     `WARNING: ${message}\n\n` +
                     `MXTK Address: ${this.MXTK_ADDRESS}\n` +
-                    `WETH Address: ${this.WETH_ADDRESS}\n` +
+                    `USDT Address: ${this.USDT_ADDRESS}\n` +
                     `Factory Address: ${this.UNISWAP_V2_FACTORY}\n\n` +
-                    'Action Required: A liquidity pool needs to be created on Uniswap V2 for MXTK-WETH pair.'
+                    'Action Required: A liquidity pool needs to be created on Uniswap V2 for MXTK-USDT pair.'
                 );
                 
                 // Return null but don't throw an error
@@ -253,7 +254,7 @@ class MXTKMarketMaker {
             
             const slot0 = await poolContract.slot0();
             if (slot0.sqrtPriceX96.eq(0)) {
-                const message = 'MXTK–WETH pool exists but has zero liquidity. Trading cannot begin until liquidity is added.';
+                const message = 'MXTK–USDT pool exists but has zero liquidity. Trading cannot begin until liquidity is added.';
                 console.warn(message);
                 
                 // Send email alert about zero liquidity
@@ -262,8 +263,8 @@ class MXTKMarketMaker {
                     `WARNING: ${message}\n\n` +
                     `Pool Address: ${poolAddress}\n` +
                     `MXTK Address: ${this.MXTK_ADDRESS}\n` +
-                    `WETH Address: ${this.WETH_ADDRESS}\n\n` +
-                    'Action Required: Liquidity needs to be added to the MXTK-WETH pool on Uniswap V2.'
+                    `USDT Address: ${this.USDT_ADDRESS}\n\n` +
+                    'Action Required: Liquidity needs to be added to the MXTK-USDT pool on Uniswap V2.'
                 );
                 
                 return null;
@@ -367,8 +368,16 @@ class MXTKMarketMaker {
 
         try {
             const path = isBuy 
-                ? [this.WETH_ADDRESS, this.MXTK_ADDRESS]
-                : [this.MXTK_ADDRESS, this.WETH_ADDRESS];
+                ? [this.USDT_ADDRESS, this.MXTK_ADDRESS]
+                : [this.MXTK_ADDRESS, this.USDT_ADDRESS];
+
+            // Get USDT decimals
+            const usdtContract = new ethers.Contract(
+                this.USDT_ADDRESS,
+                ['function decimals() public view returns (uint8)'],
+                this.provider
+            );
+            const decimals = await usdtContract.decimals();
 
             // Create exact input single params
             const params = {
@@ -377,7 +386,9 @@ class MXTKMarketMaker {
                 fee: 3000, // 0.3% fee tier
                 recipient: wallet.address,
                 deadline: Math.floor(Date.now() / 1000) + 300,
-                amountIn: ethers.utils.parseEther(amount.toString()),
+                amountIn: isBuy 
+                    ? ethers.utils.parseUnits(amount.toString(), decimals) // USDT has 6 decimals
+                    : ethers.utils.parseEther(amount.toString()), // MXTK has 18 decimals
                 amountOutMinimum: 0, // We'll calculate this
                 sqrtPriceLimitX96: 0 // No limit
             };
@@ -652,33 +663,36 @@ class MXTKMarketMaker {
             await mxtkTx.wait();
             console.log('✅ MXTK approved');
 
-            // Then handle WETH
-            console.log('Approving WETH...');
-            const wethContract = new ethers.Contract(
-                this.WETH_ADDRESS,
+            // Then handle USDT
+            console.log('Approving USDT...');
+            const usdtContract = new ethers.Contract(
+                this.USDT_ADDRESS,
                 [
                     'function approve(address spender, uint256 amount) public returns (bool)',
-                    'function deposit() public payable'
+                    'function decimals() public view returns (uint8)'
                 ],
                 wallet
             );
 
             try {
-                // Increment nonce for WETH approval
+                // Increment nonce for USDT approval
                 overrides.nonce++;
 
-                // Directly try to approve WETH without checking allowance
-                console.log('Setting WETH approval...');
-                const wethTx = await wethContract.approve(
+                // Get USDT decimals
+                const decimals = await usdtContract.decimals();
+                
+                // Directly try to approve USDT without checking allowance
+                console.log('Setting USDT approval...');
+                const usdtTx = await usdtContract.approve(
                     this.UNISWAP_V2_ROUTER,
                     ethers.constants.MaxUint256,
                     { ...overrides }
                 );
-                await wethTx.wait();
-                console.log('✅ WETH approved');
-            } catch (wethError) {
-                console.log('Note: WETH approval skipped - may already be approved');
-                console.log('WETH approval error:', wethError.message);
+                await usdtTx.wait();
+                console.log('✅ USDT approved');
+            } catch (usdtError) {
+                console.log('Note: USDT approval skipped - may already be approved');
+                console.log('USDT approval error:', usdtError.message);
             }
 
             console.log('Token approvals completed successfully');
