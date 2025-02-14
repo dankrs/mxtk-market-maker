@@ -74,7 +74,7 @@ ARBITRUM_TESTNET_RPC=https://sepolia-rollup.arbitrum.io/rpc
 MORALIS_API_KEY=your_moralis_api_key
 
 # Trading Parameters
-MAX_DAILY_VOLUME=10                      # Maximum MXTK tokens that can be traded in 24 hours
+MAX_DAILY_VOLUME=1                       # Maximum MXTK tokens that can be traded in 24 hours
                                          # Bot stops trading when this limit is reached
                                          # Resets at UTC midnight
 
@@ -91,8 +91,8 @@ VOLUME_ALERT_THRESHOLD=0.8               # Alerts when daily volume reaches 80% 
                                          # Example: Alert at 8 MXTK if MAX_DAILY_VOLUME is 10
 
 # Trading Ranges
-MIN_TRADE_AMOUNT=0.05                    # Minimum amount of MXTK per trade
-MAX_TRADE_AMOUNT=1.0                     # Maximum amount of MXTK per trade
+MIN_TRADE_AMOUNT=0.0005                  # Minimum amount of MXTK per trade
+MAX_TRADE_AMOUNT=0.05                    # Maximum amount of MXTK per trade
                                          # Bot randomly selects amount between these values
                                          # Helps create natural trading patterns
 

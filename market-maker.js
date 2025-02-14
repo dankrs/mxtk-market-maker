@@ -46,8 +46,8 @@ class MXTKMarketMaker {
                 max: parseInt(process.env.MAX_TIME_DELAY) || 900
             },
             amountRange: {
-                min: parseFloat(process.env.MIN_TRADE_AMOUNT) || 0.05,
-                max: parseFloat(process.env.MAX_TRADE_AMOUNT) || 1
+                min: parseFloat(process.env.MIN_TRADE_AMOUNT) || 0.0005,
+                max: parseFloat(process.env.MAX_TRADE_AMOUNT) || 0.05
             },
             gasLimit: parseInt(process.env.GAS_LIMIT) || 300000,
             maxGasPrice: parseInt(process.env.MAX_GAS_PRICE) || 100
