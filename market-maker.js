@@ -21,11 +21,28 @@ const WalletManager = require('./wallet-manager');
 class MXTKMarketMaker {
     constructor(config) {
         // Token addresses for Arbitrum
-        this.MXTK_ADDRESS = '0x3e4ffeb394b371aaaa0998488046ca19d870d9ba';
-        this.USDT_ADDRESS = '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9';  // Arbitrum USDT
+        this.MXTK_ADDRESS = process.env.MXTK_ADDRESS;
+        if (!this.MXTK_ADDRESS) {
+            throw new Error('MXTK_ADDRESS not configured');
+        }
         
-        this.UNISWAP_V2_ROUTER = '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45';
-        this.UNISWAP_V2_FACTORY = '0x1F98431c8aD98523631AE4a59f267346ea31F984';
+        this.USDT_ADDRESS = process.env.USDT_ADDRESS;
+        if (!this.USDT_ADDRESS) {
+            throw new Error('USDT_ADDRESS not configured');
+        }
+        
+        // Update Uniswap V3 contract addresses
+        this.UNISWAP_V3_ROUTER = process.env.UNISWAP_V3_ROUTER;
+        this.UNISWAP_V3_FACTORY = process.env.UNISWAP_V3_FACTORY;
+        this.UNISWAP_V3_QUOTER = process.env.UNISWAP_V3_QUOTER;
+        this.UNISWAP_POOL_FEE = parseInt(process.env.UNISWAP_POOL_FEE);
+        
+        if (!this.UNISWAP_V3_ROUTER || !this.UNISWAP_V3_FACTORY || !this.UNISWAP_V3_QUOTER) {
+            throw new Error('Uniswap V3 contract addresses not properly configured');
+        }
+        
+        // Slippage settings
+        this.MAX_SLIPPAGE = parseFloat(process.env.MAX_SLIPPAGE);
         
         // Merge custom configuration with defaults from environment
         this.config = {
@@ -79,52 +96,68 @@ class MXTKMarketMaker {
 
     async initializeServices() {
         try {
-            // Initialize Moralis with API key
-            await Moralis.start({
-                apiKey: process.env.MORALIS_API_KEY
-            });
-
-            // Set up the Ethereum provider using RPC from configuration
-            this.provider = new ethers.providers.JsonRpcProvider(
-                process.env.ARBITRUM_MAINNET_RPC,
-                {
-                    chainId: 42161,
-                    name: 'arbitrum',
-                    ensAddress: null
-                }
-            );
-
-            // Test the connection
-            try {
-                await this.provider.getNetwork();
-                console.log('✅ Successfully connected to Arbitrum mainnet');
-            } catch (error) {
-                throw new Error(`Failed to connect to Arbitrum: ${error.message}`);
+            // Validate required contract addresses
+            if (!this.MXTK_ADDRESS) {
+                throw new Error('MXTK_ADDRESS is not configured in environment variables');
+            }
+            if (!this.USDT_ADDRESS) {
+                throw new Error('USDT_ADDRESS is not configured in environment variables');
+            }
+            if (!this.UNISWAP_V3_ROUTER) {
+                throw new Error('UNISWAP_V3_ROUTER is not configured in environment variables');
+            }
+            if (!this.UNISWAP_V3_FACTORY) {
+                throw new Error('UNISWAP_V3_FACTORY is not configured in environment variables');
+            }
+            if (!this.UNISWAP_V3_QUOTER) {
+                throw new Error('UNISWAP_V3_QUOTER is not configured in environment variables');
             }
 
-            // Initialize the MXTK token contract instance using ERC20 ABI
+            // Log the addresses for debugging
+            console.log('\nInitializing with addresses:');
+            console.log('MXTK:', this.MXTK_ADDRESS);
+            console.log('USDT:', this.USDT_ADDRESS);
+            console.log('Router:', this.UNISWAP_V3_ROUTER);
+            console.log('Factory:', this.UNISWAP_V3_FACTORY);
+            console.log('Quoter:', this.UNISWAP_V3_QUOTER);
+
+            // Initialize provider based on network
+            const rpcUrl = this.config.isTestnet 
+                ? process.env.ARBITRUM_TESTNET_RPC 
+                : process.env.ARBITRUM_MAINNET_RPC;
+            
+            this.provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+            
+            // Initialize contract interfaces
             this.mxtkContract = new ethers.Contract(
                 this.MXTK_ADDRESS,
-                IERC20.abi,
+                [
+                    'function approve(address spender, uint256 amount) public returns (bool)',
+                    'function balanceOf(address account) public view returns (uint256)',
+                    'function decimals() public view returns (uint8)'
+                ],
                 this.provider
             );
 
-            // Initialize the Uniswap V2 router contract instance
-            this.router = new ethers.Contract(
-                this.UNISWAP_V2_ROUTER,
-                IUniswapV2Router02.abi,
+            // Initialize USDT contract
+            this.usdtContract = new ethers.Contract(
+                this.USDT_ADDRESS,
+                [
+                    'function approve(address spender, uint256 amount) public returns (bool)',
+                    'function balanceOf(address account) public view returns (uint256)',
+                    'function decimals() public view returns (uint8)'
+                ],
                 this.provider
             );
 
-            // Set up monitoring systems (price, balance, volume reset)
-            await this.initializeMonitoring();
+            // Initialize wallet manager
+            this.walletManager = new WalletManager(this.provider);
+
+            console.log('✅ Services initialized successfully');
             
-            // Set up the email alert system
-            this.setupAlertSystem();
-
         } catch (error) {
             console.error('Error initializing services:', error);
-            await this.handleError(error);
+            throw error;
         }
     }
 
@@ -225,7 +258,7 @@ class MXTKMarketMaker {
         try {
             // 1) Instantiate the Uniswap factory on Arbitrum
             const factory = new ethers.Contract(
-                this.UNISWAP_V2_FACTORY,
+                this.UNISWAP_V3_FACTORY,
                 ['function getPool(address,address,uint24) external view returns (address)'],
                 this.provider
             );
@@ -242,8 +275,8 @@ class MXTKMarketMaker {
                     `WARNING: ${message}\n\n` +
                     `MXTK Address: ${this.MXTK_ADDRESS}\n` +
                     `USDT Address: ${this.USDT_ADDRESS}\n` +
-                    `Factory Address: ${this.UNISWAP_V2_FACTORY}\n\n` +
-                    'Action Required: A liquidity pool needs to be created on Uniswap V2 for MXTK-USDT pair.'
+                    `Factory Address: ${this.UNISWAP_V3_FACTORY}\n\n` +
+                    'Action Required: A liquidity pool needs to be created on Uniswap V3 for MXTK-USDT pair.'
                 );
                 
                 // Return null but don't throw an error
@@ -269,7 +302,7 @@ class MXTKMarketMaker {
                     `Pool Address: ${poolAddress}\n` +
                     `MXTK Address: ${this.MXTK_ADDRESS}\n` +
                     `USDT Address: ${this.USDT_ADDRESS}\n\n` +
-                    'Action Required: Liquidity needs to be added to the MXTK-USDT pool on Uniswap V2.'
+                    'Action Required: Liquidity needs to be added to the MXTK-USDT pool on Uniswap V3.'
                 );
                 
                 return null;
@@ -366,38 +399,19 @@ class MXTKMarketMaker {
     }
 
     async createOrder(wallet, amount, isBuy) {
-        // Check circuit breaker
-        if (this.state.isCircuitBroken) {
-            console.log('Order rejected: Circuit breaker active');
-            return;
-        }
-
-        // Check daily volume limit
-        if (this.state.dailyVolume + amount > this.config.maxDailyVolume) {
-            console.log(`Order rejected: Would exceed daily volume limit of ${this.config.maxDailyVolume}`);
-            
-            // Send alert if approaching volume limit
-            if (this.state.dailyVolume >= this.config.maxDailyVolume * this.config.volumeAlertThreshold) {
-                await this.sendAlert('Volume Limit Warning',
-                    `Daily volume (${this.state.dailyVolume}) is approaching the limit (${this.config.maxDailyVolume})`);
-            }
-            return;
-        }
-
         try {
+            // Initialize V3 specific components
+            const router = new ethers.Contract(
+                this.UNISWAP_V3_ROUTER,
+                ['function exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160)) external returns (uint256)'],
+                wallet
+            );
+
             const path = isBuy 
                 ? [this.USDT_ADDRESS, this.MXTK_ADDRESS]
                 : [this.MXTK_ADDRESS, this.USDT_ADDRESS];
 
-            // Get USDT decimals
-            const usdtContract = new ethers.Contract(
-                this.USDT_ADDRESS,
-                ['function decimals() public view returns (uint8)'],
-                this.provider
-            );
-            const decimals = await usdtContract.decimals();
-
-            // Create exact input single params
+            // V3 specific parameters
             const params = {
                 tokenIn: path[0],
                 tokenOut: path[1],
@@ -405,26 +419,33 @@ class MXTKMarketMaker {
                 recipient: wallet.address,
                 deadline: Math.floor(Date.now() / 1000) + 300,
                 amountIn: isBuy 
-                    ? ethers.utils.parseUnits(amount.toString(), decimals) // USDT has 6 decimals
+                    ? ethers.utils.parseUnits(amount.toString(), 6) // USDT has 6 decimals
                     : ethers.utils.parseEther(amount.toString()), // MXTK has 18 decimals
-                amountOutMinimum: 0, // We'll calculate this
+                amountOutMinimum: 0, // Will be calculated from quote
                 sqrtPriceLimitX96: 0 // No limit
             };
 
-            // Get quote first
-            const amounts = await this.router.connect(wallet).quoteExactInputSingle([
+            // Get quote using V3 quoter
+            const quoterAddress = '0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6';
+            const quoter = new ethers.Contract(
+                quoterAddress,
+                ['function quoteExactInputSingle(address,address,uint24,uint256,uint160) external returns (uint256)'],
+                this.provider
+            );
+
+            const quote = await quoter.quoteExactInputSingle(
                 params.tokenIn,
                 params.tokenOut,
-                params.amountIn,
                 params.fee,
-                params.sqrtPriceLimitX96
-            ]);
+                params.amountIn,
+                0
+            );
 
-            // Set minimum output amount with 2% slippage
-            params.amountOutMinimum = amounts.amountOut.mul(98).div(100);
+            // Set minimum output with 2% slippage
+            params.amountOutMinimum = quote.mul(98).div(100);
 
             // Execute the swap
-            const tx = await this.router.connect(wallet).exactInputSingle(
+            const tx = await router.exactInputSingle(
                 params,
                 {
                     gasLimit: this.config.gasLimit,
@@ -504,84 +525,164 @@ class MXTKMarketMaker {
 
     async distributeInitialEth() {
         try {
-            // Load master wallet from environment variable
-            if (!process.env.MASTER_WALLET_PRIVATE_KEY) {
-                throw new Error('MASTER_WALLET_PRIVATE_KEY not found in environment variables');
-            }
-
-            // Use Arbitrum provider with better error handling
-            const arbitrumRpc = process.env.ARBITRUM_MAINNET_RPC;
-            if (!arbitrumRpc) {
-                throw new Error('ARBITRUM_MAINNET_RPC not found in environment variables');
-            }
-
-            console.log('\nConnecting to Arbitrum mainnet...');
-            const arbitrumProvider = new ethers.providers.JsonRpcProvider(
-                arbitrumRpc,
-                {
-                    chainId: 42161,
-                    name: 'arbitrum',
-                    ensAddress: null
-                }
-            );
-
-            // Test the connection
-            try {
-                await arbitrumProvider.getNetwork();
-                console.log('✅ Successfully connected to Arbitrum mainnet');
-            } catch (error) {
-                throw new Error(`Failed to connect to Arbitrum: ${error.message}`);
-            }
-
+            console.log('\n=== Master Wallet Status (Arbitrum) ===');
+            
+            // Get master wallet
             const masterWallet = new ethers.Wallet(
                 process.env.MASTER_WALLET_PRIVATE_KEY,
-                arbitrumProvider
+                this.provider
             );
+            console.log('Master wallet address:', masterWallet.address);
 
-            // Check master wallet balance on Arbitrum
-            const masterBalance = await masterWallet.getBalance();
-            const requiredBalance = ethers.utils.parseEther('0.005'); // 0.001 ETH per wallet + gas
-            
-            if (masterBalance.lt(requiredBalance)) {
-                console.log('\n=== Master Wallet Status (Arbitrum) ===');
-                console.log(`Master wallet address: ${masterWallet.address}`);
-                console.log(`Current Arbitrum balance: ${ethers.utils.formatEther(masterBalance)} ETH`);
-                console.log(`Required balance: ${ethers.utils.formatEther(requiredBalance)} ETH`);
-                throw new Error('Insufficient funds in master wallet on Arbitrum');
+            // Check master wallet balance
+            const masterBalance = await this.provider.getBalance(masterWallet.address);
+            const masterBalanceEth = ethers.utils.formatEther(masterBalance);
+            console.log('Current Arbitrum balance:', masterBalanceEth, 'ETH');
+
+            // Calculate required balance for distribution
+            const requiredEthPerWallet = 0.001; // 0.001 ETH per wallet
+            const totalWallets = this.state.wallets.length;
+            const totalRequiredEth = requiredEthPerWallet * totalWallets;
+            console.log('Required balance:', totalRequiredEth, 'ETH');
+
+            // Check if master wallet has sufficient funds
+            if (parseFloat(masterBalanceEth) < totalRequiredEth) {
+                const shortfall = totalRequiredEth - parseFloat(masterBalanceEth);
+                console.log('\n⚠️ Insufficient Funds Warning:');
+                console.log('----------------------------------------');
+                console.log(`Current Balance: ${masterBalanceEth} ETH`);
+                console.log(`Required Balance: ${totalRequiredEth} ETH`);
+                console.log(`Shortfall: ${shortfall.toFixed(4)} ETH`);
+                console.log(`Number of Wallets: ${totalWallets}`);
+                console.log('----------------------------------------');
+                console.log('Please send the required ETH to the master wallet address above.');
+                console.log('The bot will not be able to operate without sufficient funds.');
+                console.log('----------------------------------------\n');
+
+                // Send alert email if configured
+                const alertMessage = `
+                    Insufficient funds detected in master wallet on Arbitrum
+                    
+                    Master Wallet: ${masterWallet.address}
+                    Current Balance: ${masterBalanceEth} ETH
+                    Required Balance: ${totalRequiredEth} ETH
+                    Shortfall: ${shortfall.toFixed(4)} ETH
+                    
+                    Please add funds to continue operation.
+                `;
+                await this.sendAlert('Low Balance Alert', alertMessage);
+
+                throw new Error('INSUFFICIENT_FUNDS');
             }
 
-            console.log('\n=== Starting ETH Distribution on Arbitrum ===');
-            
-            // Distribute ETH to each wallet on Arbitrum
+            // Distribute ETH to trading wallets
+            console.log('\n=== Distributing ETH to Trading Wallets ===');
             for (const wallet of this.state.wallets) {
-                const balance = await arbitrumProvider.getBalance(wallet.address);
+                const balance = await this.provider.getBalance(wallet.address);
+                const balanceEth = ethers.utils.formatEther(balance);
                 
-                if (balance.lt(ethers.utils.parseEther('0.001'))) {
-                    console.log(`Sending 0.001 ETH to ${wallet.address} on Arbitrum...`);
+                if (parseFloat(balanceEth) < requiredEthPerWallet) {
+                    const amountToSend = ethers.utils.parseEther(
+                        (requiredEthPerWallet - parseFloat(balanceEth)).toFixed(6)
+                    );
+                    
+                    console.log(`Sending ${ethers.utils.formatEther(amountToSend)} ETH to ${wallet.address}`);
                     
                     const tx = await masterWallet.sendTransaction({
                         to: wallet.address,
-                        value: ethers.utils.parseEther('0.001'),
-                        gasLimit: 100000, // Higher gas limit for Arbitrum
+                        value: amountToSend,
+                        gasLimit: this.config.gasLimit
                     });
-
+                    
                     await tx.wait();
-                    console.log(`✅ Sent 0.001 ETH to ${wallet.address} on Arbitrum`);
+                    console.log('✅ Transfer complete');
                 } else {
-                    console.log(`Wallet ${wallet.address} already has sufficient funds on Arbitrum`);
+                    console.log(`Wallet ${wallet.address} already has sufficient funds (${balanceEth} ETH)`);
                 }
             }
-
-            console.log('=== ETH Distribution Complete on Arbitrum ===\n');
+            
+            console.log('\n✅ ETH distribution completed successfully\n');
 
         } catch (error) {
-            console.error('Error distributing ETH on Arbitrum:', error);
-            throw error;
+            if (error.message === 'INSUFFICIENT_FUNDS') {
+                // We've already displayed the detailed message, just exit gracefully
+                process.exit(1);
+            } else {
+                console.error('Error during ETH distribution:', error);
+                throw error;
+            }
         }
     }
 
     async initialize() {
         try {
+            // Validate required environment variables
+            const requiredEnvVars = {
+                // Uniswap V3 Configuration
+                UNISWAP_V3_ROUTER: process.env.UNISWAP_V3_ROUTER,
+                UNISWAP_V3_FACTORY: process.env.UNISWAP_V3_FACTORY,
+                UNISWAP_V3_QUOTER: process.env.UNISWAP_V3_QUOTER,
+                UNISWAP_POOL_FEE: process.env.UNISWAP_POOL_FEE,
+
+                // Token Addresses
+                MXTK_ADDRESS: process.env.MXTK_ADDRESS,
+                USDT_ADDRESS: process.env.USDT_ADDRESS,
+
+                // Network Configuration
+                ARBITRUM_MAINNET_RPC: process.env.ARBITRUM_MAINNET_RPC,
+                MORALIS_API_KEY: process.env.MORALIS_API_KEY,
+                MASTER_WALLET_PRIVATE_KEY: process.env.MASTER_WALLET_PRIVATE_KEY
+            };
+
+            // Check for missing required variables
+            const missingVars = Object.entries(requiredEnvVars)
+                .filter(([_, value]) => !value)
+                .map(([key]) => key);
+
+            if (missingVars.length > 0) {
+                throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+            }
+
+            // Validate addresses
+            const addressVars = {
+                UNISWAP_V3_ROUTER: process.env.UNISWAP_V3_ROUTER,
+                UNISWAP_V3_FACTORY: process.env.UNISWAP_V3_FACTORY,
+                UNISWAP_V3_QUOTER: process.env.UNISWAP_V3_QUOTER,
+                MXTK_ADDRESS: process.env.MXTK_ADDRESS,
+                USDT_ADDRESS: process.env.USDT_ADDRESS
+            };
+
+            for (const [key, value] of Object.entries(addressVars)) {
+                if (!ethers.utils.isAddress(value)) {
+                    throw new Error(`Invalid Ethereum address for ${key}: ${value}`);
+                }
+            }
+
+            // Validate numeric values
+            const numericVars = {
+                UNISWAP_POOL_FEE: { value: process.env.UNISWAP_POOL_FEE, min: 1, max: 1000000 },
+                MAX_SLIPPAGE: { value: process.env.MAX_SLIPPAGE, min: 0.001, max: 0.1 },
+                MIN_SPREAD: { value: process.env.MIN_SPREAD, min: 0.001, max: 0.1 },
+                TARGET_SPREAD: { value: process.env.TARGET_SPREAD, min: 0.001, max: 0.1 },
+                MAX_SPREAD: { value: process.env.MAX_SPREAD, min: 0.001, max: 0.1 }
+            };
+
+            for (const [key, config] of Object.entries(numericVars)) {
+                const value = parseFloat(config.value);
+                if (isNaN(value) || value < config.min || value > config.max) {
+                    throw new Error(`Invalid value for ${key}: ${config.value}. Must be between ${config.min} and ${config.max}`);
+                }
+            }
+
+            // Validate spread relationships
+            if (parseFloat(process.env.MIN_SPREAD) > parseFloat(process.env.TARGET_SPREAD)) {
+                throw new Error('MIN_SPREAD cannot be greater than TARGET_SPREAD');
+            }
+            if (parseFloat(process.env.TARGET_SPREAD) > parseFloat(process.env.MAX_SPREAD)) {
+                throw new Error('TARGET_SPREAD cannot be greater than MAX_SPREAD');
+            }
+
+            // Continue with existing initialization code
             await this.loadState();
             await this.initializeServices();
             
@@ -612,15 +713,7 @@ class MXTKMarketMaker {
             await this.distributeInitialEth();
 
             // Check and display final balances
-            console.log('\n=== Final Wallet Balances ===');
-            for (const wallet of this.state.wallets) {
-                const balance = await this.provider.getBalance(wallet.address);
-                const ethBalance = ethers.utils.formatEther(balance);
-                console.log(`Wallet ${wallet.address}`);
-                console.log(`Balance: ${ethBalance} ETH`);
-                console.log('---------------------');
-            }
-            console.log('=====================\n');
+            await this.displayWalletBalances();
 
             // Approve tokens for each wallet
             for (const wallet of this.state.wallets) {
@@ -630,7 +723,21 @@ class MXTKMarketMaker {
         } catch (error) {
             console.error('Error in initialization:', error);
             await this.handleError(error);
+            throw error;
         }
+    }
+
+    // Helper method to display wallet balances
+    async displayWalletBalances() {
+        console.log('\n=== Final Wallet Balances ===');
+        for (const wallet of this.state.wallets) {
+            const balance = await this.provider.getBalance(wallet.address);
+            const ethBalance = ethers.utils.formatEther(balance);
+            console.log(`Wallet ${wallet.address}`);
+            console.log(`Balance: ${ethBalance} ETH`);
+            console.log('---------------------');
+        }
+        console.log('=====================\n');
     }
 
     async approveTokens(wallet) {
@@ -645,15 +752,23 @@ class MXTKMarketMaker {
                 throw new Error('Insufficient ETH balance for approvals');
             }
 
-            // Get current gas price and check against max
-            const currentGasPrice = await this.provider.getGasPrice();
-            if (currentGasPrice.gt(ethers.utils.parseUnits(this.config.maxGasPrice.toString(), 'gwei'))) {
-                throw new Error(`Current gas price ${ethers.utils.formatUnits(currentGasPrice, 'gwei')} gwei exceeds maximum ${this.config.maxGasPrice} gwei`);
-            }
+            // Get current base fee and priority fee
+            const [baseFee, priorityFee] = await Promise.all([
+                this.provider.getBlock('latest').then(block => block.baseFeePerGas),
+                this.provider.getGasPrice().then(price => price.div(10)) // Use 10% of current gas price as priority fee
+            ]);
+
+            // Calculate max fee per gas (base fee + priority fee + 20% buffer)
+            const maxFeePerGas = baseFee.mul(120).div(100).add(priorityFee);
+            const maxPriorityFeePerGas = priorityFee;
+
+            console.log(`Current base fee: ${ethers.utils.formatUnits(baseFee, 'gwei')} gwei`);
+            console.log(`Max fee per gas: ${ethers.utils.formatUnits(maxFeePerGas, 'gwei')} gwei`);
 
             const overrides = {
-                gasLimit: 500000, // Increased gas limit for Arbitrum
-                gasPrice: currentGasPrice,
+                maxFeePerGas,
+                maxPriorityFeePerGas,
+                gasLimit: this.config.gasLimit,
                 nonce: await this.provider.getTransactionCount(wallet.address)
             };
 
@@ -661,10 +776,10 @@ class MXTKMarketMaker {
             console.log('Approving MXTK...');
             const mxtkContract = this.mxtkContract.connect(wallet);
             
-            // First set approval to 0 (recommended for some tokens)
+            // First set approval to 0
             console.log('Resetting MXTK approval...');
             const resetTx = await mxtkContract.approve(
-                this.UNISWAP_V2_ROUTER,
+                this.UNISWAP_V3_ROUTER,
                 0,
                 { ...overrides }
             );
@@ -676,7 +791,7 @@ class MXTKMarketMaker {
 
             // Then set to max value
             const mxtkTx = await mxtkContract.approve(
-                this.UNISWAP_V2_ROUTER,
+                this.UNISWAP_V3_ROUTER,
                 ethers.constants.MaxUint256,
                 { ...overrides }
             );
@@ -694,44 +809,20 @@ class MXTKMarketMaker {
                 wallet
             );
 
-            try {
-                // Increment nonce for USDT approval
-                overrides.nonce++;
+            // Increment nonce for USDT approval
+            overrides.nonce++;
 
-                // Get USDT decimals
-                const decimals = await usdtContract.decimals();
-                
-                // Directly try to approve USDT without checking allowance
-                console.log('Setting USDT approval...');
-                const usdtTx = await usdtContract.approve(
-                    this.UNISWAP_V2_ROUTER,
-                    ethers.constants.MaxUint256,
-                    { ...overrides }
-                );
-                await usdtTx.wait();
-                console.log('✅ USDT approved');
-            } catch (usdtError) {
-                console.log('Note: USDT approval skipped - may already be approved');
-                console.log('USDT approval error:', usdtError.message);
-            }
+            const usdtTx = await usdtContract.approve(
+                this.UNISWAP_V3_ROUTER,
+                ethers.constants.MaxUint256,
+                { ...overrides }
+            );
+            await usdtTx.wait();
+            console.log('✅ USDT approved');
 
-            console.log('Token approvals completed successfully');
         } catch (error) {
             console.error('Error in approveTokens:', error);
-            if (error.error && error.error.reason) {
-                console.error('Reason:', error.error.reason);
-            }
-            if (error.transaction) {
-                console.error('Failed transaction:', {
-                    to: error.transaction.to,
-                    from: error.transaction.from,
-                    data: error.transaction.data,
-                    value: error.transaction.value ? 
-                        ethers.utils.formatEther(error.transaction.value) + ' ETH' : '0 ETH',
-                    gasPrice: error.transaction.gasPrice ? 
-                        ethers.utils.formatUnits(error.transaction.gasPrice, 'gwei') + ' gwei' : 'unknown'
-                });
-            }
+            await this.handleError(error);
             throw error;
         }
     }
