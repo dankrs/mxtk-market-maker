@@ -132,3 +132,4 @@ dist
 node_modules/
 .secure
 .wallets
+.cursorrules

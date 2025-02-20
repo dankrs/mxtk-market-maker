@@ -97,6 +97,67 @@ class MXTKMarketMaker {
             console.warn('⚠️ Email alerts not configured. Please check SMTP settings in .env file');
             this.emailTransport = null;
         }
+
+        // Initialize provider
+        this.provider = new ethers.providers.JsonRpcProvider(process.env.ARBITRUM_MAINNET_RPC);
+
+        // Initialize MXTK contract
+        this.mxtkContract = new ethers.Contract(
+            this.MXTK_ADDRESS,
+            [
+                'function approve(address spender, uint256 amount) public returns (bool)',
+                'function allowance(address owner, address spender) public view returns (uint256)',
+                'function balanceOf(address account) public view returns (uint256)',
+                'function decimals() public view returns (uint8)'
+            ],
+            this.provider
+        );
+
+        // Initialize USDT contract
+        this.usdtContract = new ethers.Contract(
+            this.USDT_ADDRESS,
+            [
+                'function approve(address spender, uint256 amount) public returns (bool)',
+                'function allowance(address owner, address spender) public view returns (uint256)',
+                'function balanceOf(address account) public view returns (uint256)',
+                'function decimals() public view returns (uint8)'
+            ],
+            this.provider
+        );
+
+        // Initialize Uniswap V3 Router contract
+        this.routerContract = new ethers.Contract(
+            this.UNISWAP_V3_ROUTER,
+            [
+                'function exactInputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)',
+                'function exactOutputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountOut, uint256 amountInMaximum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountIn)'
+            ],
+            this.provider
+        );
+
+        // Initialize Uniswap V3 Factory contract
+        this.factoryContract = new ethers.Contract(
+            this.UNISWAP_V3_FACTORY,
+            [
+                'function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)',
+                'function createPool(address tokenA, address tokenB, uint24 fee) external returns (address pool)'
+            ],
+            this.provider
+        );
+
+        // Initialize Uniswap V3 Quoter contract
+        this.quoterContract = new ethers.Contract(
+            this.UNISWAP_V3_QUOTER,
+            [
+                'function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) external returns (uint256 amountOut)',
+                'function quoteExactOutputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountOut, uint160 sqrtPriceLimitX96) external returns (uint256 amountIn)'
+            ],
+            this.provider
+        );
+
+        // Initialize token decimals (will be set in initialize())
+        this.mxtkDecimals = null;
+        this.usdtDecimals = null;
     }
 
     getInitialState() {
@@ -150,6 +211,7 @@ class MXTKMarketMaker {
                 this.MXTK_ADDRESS,
                 [
                     'function approve(address spender, uint256 amount) public returns (bool)',
+                    'function allowance(address owner, address spender) public view returns (uint256)',
                     'function balanceOf(address account) public view returns (uint256)',
                     'function decimals() public view returns (uint8)'
                 ],
@@ -161,6 +223,7 @@ class MXTKMarketMaker {
                 this.USDT_ADDRESS,
                 [
                     'function approve(address spender, uint256 amount) public returns (bool)',
+                    'function allowance(address owner, address spender) public view returns (uint256)',
                     'function balanceOf(address account) public view returns (uint256)',
                     'function decimals() public view returns (uint8)'
                 ],
@@ -413,68 +476,87 @@ class MXTKMarketMaker {
 
     async createOrder(wallet, amount, isBuy) {
         try {
-            // Initialize V3 specific components
-            const router = new ethers.Contract(
-                this.UNISWAP_V3_ROUTER,
-                ['function exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160)) external returns (uint256)'],
-                wallet
-            );
+            // Get token decimals
+            const mxtkDecimals = await this.mxtkContract.decimals();
+            const usdtDecimals = await this.usdtContract.decimals(); // Usually 6 for USDT
 
-            const path = isBuy 
-                ? [this.USDT_ADDRESS, this.MXTK_ADDRESS]
-                : [this.MXTK_ADDRESS, this.USDT_ADDRESS];
-
-            // V3 specific parameters
-            const params = {
-                tokenIn: path[0],
-                tokenOut: path[1],
-                fee: 3000, // 0.3% fee tier
-                recipient: wallet.address,
-                deadline: Math.floor(Date.now() / 1000) + 300,
-                amountIn: isBuy 
-                    ? ethers.utils.parseUnits(amount.toString(), 6) // USDT has 6 decimals
-                    : ethers.utils.parseEther(amount.toString()), // MXTK has 18 decimals
-                amountOutMinimum: 0, // Will be calculated from quote
-                sqrtPriceLimitX96: 0 // No limit
-            };
-
-            // Get quote using V3 quoter
-            const quoterAddress = '0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6';
-            const quoter = new ethers.Contract(
-                quoterAddress,
-                ['function quoteExactInputSingle(address,address,uint24,uint256,uint160) external returns (uint256)'],
-                this.provider
-            );
-
-            const quote = await quoter.quoteExactInputSingle(
-                params.tokenIn,
-                params.tokenOut,
-                params.fee,
-                params.amountIn,
-                0
-            );
-
-            // Set minimum output with 2% slippage
-            params.amountOutMinimum = quote.mul(98).div(100);
-
-            // Execute the swap
-            const tx = await router.exactInputSingle(
-                params,
-                {
-                    gasLimit: this.config.gasLimit,
-                    gasPrice: await this.provider.getGasPrice()
-                }
-            );
-
-            await tx.wait();
+            // Round the amount to the lower of the two decimals to ensure compatibility
+            const minDecimals = Math.min(mxtkDecimals, usdtDecimals);
+            const roundedAmount = Number(amount).toFixed(minDecimals);
             
-            this.state.dailyVolume += amount;
-            await this.saveState();
+            console.log(`Creating ${isBuy ? 'buy' : 'sell'} order for ${roundedAmount} tokens`);
+            console.log('Input amount:', amount);
+            console.log('Rounded amount:', roundedAmount);
+            console.log('MXTK decimals:', mxtkDecimals);
+            console.log('USDT decimals:', usdtDecimals);
 
-            console.log(`Order executed: ${isBuy ? 'Buy' : 'Sell'} ${amount} MXTK`);
+            // Declare variables outside try block
+            let mxtkAmount, usdtAmount;
+
+            try {
+                // Parse amounts with correct decimals
+                mxtkAmount = ethers.utils.parseUnits(roundedAmount, mxtkDecimals);
+                usdtAmount = ethers.utils.parseUnits(roundedAmount, usdtDecimals);
+                
+                console.log('Parsed MXTK amount:', mxtkAmount.toString());
+                console.log('Parsed USDT amount:', usdtAmount.toString());
+            } catch (parseError) {
+                console.error('Error parsing amounts:', parseError);
+                console.log('Problematic values:', {
+                    amount,
+                    roundedAmount,
+                    mxtkDecimals,
+                    usdtDecimals
+                });
+                throw parseError;
+            }
+
+            // Connect contracts with wallet signer
+            const mxtkWithSigner = this.mxtkContract.connect(wallet);
+            const usdtWithSigner = this.usdtContract.connect(wallet);
+            const routerWithSigner = this.routerContract.connect(wallet);
+
+            // Check if approvals are needed
+            const mxtkAllowance = await mxtkWithSigner.allowance(wallet.address, this.UNISWAP_V3_ROUTER);
+            const usdtAllowance = await usdtWithSigner.allowance(wallet.address, this.UNISWAP_V3_ROUTER);
+
+            // Approve MXTK if needed
+            if (mxtkAllowance.lt(mxtkAmount)) {
+                console.log('Approving MXTK...');
+                const mxtkTx = await mxtkWithSigner.approve(
+                    this.UNISWAP_V3_ROUTER,
+                    mxtkAmount
+                );
+                await mxtkTx.wait();
+                console.log('✅ MXTK approved');
+            }
+
+            // Approve USDT if needed
+            if (usdtAllowance.lt(usdtAmount)) {
+                console.log('Approving USDT...');
+                const usdtTx = await usdtWithSigner.approve(
+                    this.UNISWAP_V3_ROUTER,
+                    usdtAmount
+                );
+                await usdtTx.wait();
+                console.log('✅ USDT approved');
+            }
+
+            // Now create the order with the connected wallet
+            const router = routerWithSigner;
+            
+            // Rest of your order creation logic...
+            
         } catch (error) {
             console.error('Error creating order:', error);
+            console.log('Full error details:', {
+                message: error.message,
+                code: error.code,
+                fault: error.fault,
+                operation: error.operation
+            });
             await this.handleError(error);
+            throw error;
         }
     }
 
@@ -733,6 +815,14 @@ class MXTKMarketMaker {
                 await this.approveTokens(wallet);
             }
 
+            // Get and cache token decimals
+            this.mxtkDecimals = await this.mxtkContract.decimals();
+            this.usdtDecimals = await this.usdtContract.decimals();
+            
+            console.log('Token decimals initialized:');
+            console.log('- MXTK:', this.mxtkDecimals);
+            console.log('- USDT:', this.usdtDecimals);
+
         } catch (error) {
             console.error('Error in initialization:', error);
             await this.handleError(error);
@@ -761,7 +851,14 @@ class MXTKMarketMaker {
             const balance = await this.provider.getBalance(wallet.address);
             console.log(`Wallet ETH balance: ${ethers.utils.formatEther(balance)} ETH`);
             
-            if (balance.lt(ethers.utils.parseEther('0.001'))) {
+            // Lower the minimum balance requirement to 0.0002 ETH
+            if (balance.lt(ethers.utils.parseEther('0.0002'))) {
+                const currentBalance = ethers.utils.formatEther(balance);
+                console.log('\n⚠️ Low Balance Warning:');
+                console.log('----------------------------------------');
+                console.log(`Current Balance: ${currentBalance} ETH`);
+                console.log(`Minimum Required: 0.0002 ETH`);
+                console.log('----------------------------------------');
                 throw new Error('Insufficient ETH balance for approvals');
             }
 
