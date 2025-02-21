@@ -186,6 +186,8 @@ class MXTKMarketMaker {
         } else {
             console.warn('Email alerts disabled: SMTP configuration missing');
         }
+
+        this.isShuttingDown = false;
     }
 
     setupLogging() {
@@ -784,22 +786,40 @@ class MXTKMarketMaker {
     }
 
     async handleError(error) {
-        await this.sendAlert('Error', error.message);
-        
-        if (this.state.recoveryAttempts < this.config.maxRetries) {
-            this.state.recoveryAttempts++;
-            await this.saveState();
+        try {
+            logger.error('Critical error encountered:', error);
             
-            console.log(`Attempting recovery (${this.state.recoveryAttempts}/${this.config.maxRetries})`);
+            // Send alert email
+            await this.sendAlertEmail('Critical Error', 
+                `Market maker encountered a critical error:\n${error.message}\n\nStack trace:\n${error.stack}`
+            );
             
-            setTimeout(async () => {
-                await this.initializeServices();
-                if (this.state.recoveryAttempts === this.config.maxRetries) {
-                    await this.sendAlert('Recovery',
-                        'Max retries reached. Manual intervention required.');
-                }
-            }, this.config.retryDelay);
+            // If it's a critical error, initiate shutdown
+            if (this.isCriticalError(error)) {
+                logger.error('Critical error detected, initiating shutdown...');
+                await this.shutdown();
+                process.exit(1);
+            }
+        } catch (alertError) {
+            logger.error('Error handling critical error:', alertError);
+            process.exit(1);
         }
+    }
+
+    isCriticalError(error) {
+        // Define conditions for critical errors
+        const criticalConditions = [
+            error.message.includes('insufficient funds'),
+            error.message.includes('nonce too low'),
+            error.message.includes('account not found'),
+            error.message.includes('invalid private key'),
+            error.message.includes('network disconnected'),
+            error.code === 'NETWORK_ERROR',
+            error.code === 'UNPREDICTABLE_GAS_LIMIT',
+            error.code === 'INSUFFICIENT_FUNDS'
+        ];
+        
+        return criticalConditions.some(condition => condition);
     }
 
     async saveState() {
@@ -896,6 +916,12 @@ class MXTKMarketMaker {
             console.log('\n=== Approving USDT transfers ===');
             const usdtWithSigner = this.usdtContract.connect(this.masterWallet);
 
+            // Get current network gas prices
+            const feeData = await this.provider.getFeeData();
+            console.log('\nCurrent network gas prices:');
+            console.log(`Base fee: ${ethers.utils.formatUnits(feeData.maxFeePerGas || '0', 'gwei')} gwei`);
+            console.log(`Priority fee: ${ethers.utils.formatUnits(feeData.maxPriorityFeePerGas || '0', 'gwei')} gwei`);
+
             // Distribute funds to trading wallets
             console.log('\n=== Distributing Funds to Trading Wallets ===');
             for (const wallet of this.state.wallets) {
@@ -918,23 +944,10 @@ class MXTKMarketMaker {
                         (requiredEthPerWallet - parseFloat(ethBalanceFormatted)).toFixed(18)
                     );
                     
-                    // Calculate gas cost with higher limits for Arbitrum
-                    const gasPrice = await this.provider.getGasPrice();
-                    const gasLimit = 100000; // Increased from 21000 for Arbitrum
-                    const gasCost = gasPrice.mul(gasLimit);
-                    
-                    // Total cost including gas
+                    // Estimate gas for ETH transfer
+                    const gasLimit = 100000; // Base gas limit for ETH transfers on Arbitrum
+                    const gasCost = feeData.maxFeePerGas.mul(gasLimit);
                     const totalCost = ethToSend.add(gasCost);
-                    
-                    // Check if master wallet has enough for transfer + gas
-                    const masterBalance = await this.provider.getBalance(this.masterWallet.address);
-                    if (masterBalance.lt(totalCost)) {
-                        throw new Error(
-                            `Insufficient ETH in master wallet for transfer + gas. ` +
-                            `Need: ${ethers.utils.formatEther(totalCost)} ETH, ` +
-                            `Have: ${ethers.utils.formatEther(masterBalance)} ETH`
-                        );
-                    }
                     
                     console.log(`Sending ${ethers.utils.formatEther(ethToSend)} ETH...`);
                     console.log(`Estimated gas cost: ${ethers.utils.formatEther(gasCost)} ETH`);
@@ -943,9 +956,9 @@ class MXTKMarketMaker {
                         to: wallet.address,
                         value: ethToSend,
                         gasLimit: gasLimit,
-                        maxFeePerGas: ethers.utils.parseUnits('5', 'gwei'),    // Increased gas price
-                        maxPriorityFeePerGas: ethers.utils.parseUnits('2', 'gwei'), // Increased priority fee
-                        type: 2 // Explicitly set EIP-1559 transaction type
+                        maxFeePerGas: feeData.maxFeePerGas.mul(120).div(100), // 20% buffer
+                        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas.mul(120).div(100),
+                        type: 2
                     });
                     
                     await ethTx.wait();
@@ -962,25 +975,29 @@ class MXTKMarketMaker {
                     console.log(`Sending ${ethers.utils.formatUnits(usdtToSend, usdtDecimals)} USDT...`);
                     
                     // Estimate gas for USDT transfer
-                    const usdtWithSigner = this.usdtContract.connect(this.masterWallet);
-                    const estimatedGas = await usdtWithSigner.estimateGas.transfer(
-                        wallet.address,
-                        usdtToSend
-                    );
-                    
+                    let estimatedGas;
+                    try {
+                        estimatedGas = await usdtWithSigner.estimateGas.transfer(
+                            wallet.address,
+                            usdtToSend
+                        );
+                        console.log(`Estimated gas for USDT transfer: ${estimatedGas.toString()}`);
+                    } catch (error) {
+                        console.warn('Failed to estimate gas for USDT transfer, using default:', error);
+                        estimatedGas = ethers.BigNumber.from('300000'); // Conservative default
+                    }
+
                     // Add 50% buffer to estimated gas
                     const gasLimit = estimatedGas.mul(150).div(100);
+                    console.log(`Using gas limit for USDT transfer: ${gasLimit.toString()}`);
                     
-                    console.log(`Estimated gas: ${estimatedGas.toString()}, Using gas limit: ${gasLimit.toString()}`);
-                    
-                    // Use the signer-connected contract for transfer
                     const usdtTx = await usdtWithSigner.transfer(
                         wallet.address,
                         usdtToSend,
                         {
-                            gasLimit: 300000, // Much higher gas limit for USDT transfers on Arbitrum
-                            maxFeePerGas: ethers.utils.parseUnits('10', 'gwei'), // Higher gas price
-                            maxPriorityFeePerGas: ethers.utils.parseUnits('2', 'gwei'),
+                            gasLimit: gasLimit,
+                            maxFeePerGas: feeData.maxFeePerGas.mul(120).div(100), // 20% buffer
+                            maxPriorityFeePerGas: feeData.maxPriorityFeePerGas.mul(120).div(100),
                             type: 2
                         }
                     );
@@ -1146,30 +1163,49 @@ class MXTKMarketMaker {
 
             console.log(`Checking approvals for wallet ${wallet.address}...`);
 
-            // Check current MXTK allowance
-            const mxtkAllowance = await this.mxtkContract.allowance(
-                wallet.address,
-                this.UNISWAP_V3_ROUTER
-            );
-            
-            // Check current USDT allowance
-            const usdtAllowance = await this.usdtContract.allowance(
-                wallet.address,
-                this.UNISWAP_V3_ROUTER
-            );
+            // Get current network gas prices
+            const feeData = await this.provider.getFeeData();
+            console.log('Current network gas prices:');
+            console.log(`Base fee: ${ethers.utils.formatUnits(feeData.maxFeePerGas || '0', 'gwei')} gwei`);
+            console.log(`Priority fee: ${ethers.utils.formatUnits(feeData.maxPriorityFeePerGas || '0', 'gwei')} gwei`);
+
+            // Check current allowances
+            const mxtkAllowance = await this.mxtkContract.allowance(wallet.address, this.UNISWAP_V3_ROUTER);
+            const usdtAllowance = await this.usdtContract.allowance(wallet.address, this.UNISWAP_V3_ROUTER);
             
             // Approve MXTK if needed
             if (mxtkAllowance.eq(0)) {
                 console.log('Approving MXTK...');
+                
+                // Estimate gas with buffer for MXTK approval
+                let estimatedGas;
+                try {
+                    estimatedGas = await mxtkWithSigner.estimateGas.approve(
+                        this.UNISWAP_V3_ROUTER,
+                        MAX_UINT256
+                    );
+                    console.log(`Estimated gas for MXTK approval: ${estimatedGas.toString()}`);
+                } catch (error) {
+                    console.warn('Failed to estimate gas for MXTK approval, using default:', error);
+                    estimatedGas = ethers.BigNumber.from('150000'); // Default if estimation fails
+                }
+
+                // Add 50% buffer to estimated gas
+                const gasLimit = estimatedGas.mul(150).div(100);
+                console.log(`Using gas limit for MXTK approval: ${gasLimit.toString()}`);
+
                 const mxtkApproveTx = await mxtkWithSigner.approve(
                     this.UNISWAP_V3_ROUTER,
                     MAX_UINT256,
                     {
-                        gasLimit: 62500,  // Increased from 100000
-                        maxFeePerGas: ethers.utils.parseUnits('1.5', 'gwei'),
-                        maxPriorityFeePerGas: ethers.utils.parseUnits('1', 'gwei')
+                        gasLimit: gasLimit,
+                        maxFeePerGas: feeData.maxFeePerGas.mul(120).div(100), // 20% buffer
+                        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas.mul(120).div(100),
+                        type: 2
                     }
                 );
+                
+                console.log('Waiting for MXTK approval confirmation...');
                 await mxtkApproveTx.wait();
                 console.log('✅ MXTK approved');
             } else {
@@ -1179,15 +1215,36 @@ class MXTKMarketMaker {
             // Approve USDT if needed
             if (usdtAllowance.eq(0)) {
                 console.log('Approving USDT...');
+                
+                // Estimate gas with buffer for USDT approval
+                let estimatedGas;
+                try {
+                    estimatedGas = await usdtWithSigner.estimateGas.approve(
+                        this.UNISWAP_V3_ROUTER,
+                        MAX_UINT256
+                    );
+                    console.log(`Estimated gas for USDT approval: ${estimatedGas.toString()}`);
+                } catch (error) {
+                    console.warn('Failed to estimate gas for USDT approval, using default:', error);
+                    estimatedGas = ethers.BigNumber.from('150000'); // Default if estimation fails
+                }
+
+                // Add 50% buffer to estimated gas
+                const gasLimit = estimatedGas.mul(150).div(100);
+                console.log(`Using gas limit for USDT approval: ${gasLimit.toString()}`);
+
                 const usdtApproveTx = await usdtWithSigner.approve(
                     this.UNISWAP_V3_ROUTER,
                     MAX_UINT256,
                     {
-                        gasLimit: 62500,  // Increased from 100000
-                        maxFeePerGas: ethers.utils.parseUnits('1.5', 'gwei'),
-                        maxPriorityFeePerGas: ethers.utils.parseUnits('1', 'gwei')
+                        gasLimit: gasLimit,
+                        maxFeePerGas: feeData.maxFeePerGas.mul(120).div(100), // 20% buffer
+                        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas.mul(120).div(100),
+                        type: 2
                     }
                 );
+                
+                console.log('Waiting for USDT approval confirmation...');
                 await usdtApproveTx.wait();
                 console.log('✅ USDT approved');
             } else {
@@ -1202,6 +1259,12 @@ class MXTKMarketMaker {
 
     async startProcessManager() {
         try {
+            // Check if shutting down
+            if (this.isShuttingDown) {
+                logger.info('Shutdown in progress, not starting new processes');
+                return;
+            }
+
             console.log('Starting process manager...');
             
             // Check if pool exists before starting
@@ -1219,8 +1282,7 @@ class MXTKMarketMaker {
             this.executeTradeLoop();
 
         } catch (error) {
-            console.error('Error starting process manager:', error);
-            throw error;
+            await this.handleError(error);
         }
     }
 
@@ -1259,6 +1321,32 @@ class MXTKMarketMaker {
                     await this.handleError(error);
                 }
             }
+        }
+    }
+
+    // Add shutdown method
+    async shutdown() {
+        this.isShuttingDown = true;
+        logger.info('Shutting down market maker...');
+        
+        try {
+            // Stop any ongoing processes
+            if (this.priceUpdateInterval) {
+                clearInterval(this.priceUpdateInterval);
+            }
+            
+            // Save current state
+            await this.saveState();
+            
+            // Close any active connections
+            if (this.provider) {
+                this.provider.removeAllListeners();
+            }
+            
+            logger.info('Market maker shutdown complete');
+        } catch (error) {
+            logger.error('Error during shutdown:', error);
+            throw error;
         }
     }
 }
