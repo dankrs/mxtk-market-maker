@@ -4,5 +4,6 @@ npm-debug.log
 .git
 .gitignore
 README.md
-logs/
+.DS_Store
+logs
 recovery.json
