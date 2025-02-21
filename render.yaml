@@ -13,4 +13,7 @@ services:
     disk:
       name: logs
       mountPath: /app/logs
-      sizeGB: 10 
+      sizeGB: 10
+      mountOptions:
+        - uid=1000
+        - gid=1000 

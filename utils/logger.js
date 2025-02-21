@@ -8,6 +8,9 @@ const logFormat = winston.format.combine(
     winston.format.json()
 );
 
+// Define log directory relative to current directory
+const LOG_DIR = path.join(process.cwd(), 'logs');
+
 // Create the logger
 const logger = winston.createLogger({
     level: 'info',
@@ -27,7 +30,7 @@ const logger = winston.createLogger({
 // Add file transport only in production
 if (process.env.NODE_ENV === 'production') {
     logger.add(new DailyRotateFile({
-        filename: '/app/logs/mxtk-market-maker-%DATE%.log',
+        filename: path.join(LOG_DIR, 'mxtk-market-maker-%DATE%.log'),
         datePattern: 'YYYY-MM-DD',
         maxSize: '20m',
         maxFiles: '14d',
@@ -35,7 +38,7 @@ if (process.env.NODE_ENV === 'production') {
     }));
 
     logger.add(new DailyRotateFile({
-        filename: '/app/logs/mxtk-market-maker-error-%DATE%.log',
+        filename: path.join(LOG_DIR, 'mxtk-market-maker-error-%DATE%.log'),
         datePattern: 'YYYY-MM-DD',
         maxSize: '20m',
         maxFiles: '14d',

@@ -15,7 +15,8 @@ COPY . .
 
 # Create necessary directories with proper permissions
 RUN mkdir -p /app/logs /app/data && \
-    chown -R node:node /app
+    chown -R node:node /app && \
+    chmod -R 755 /app/logs /app/data
 
 # Switch to non-root user
 USER node
