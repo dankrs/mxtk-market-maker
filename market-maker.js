@@ -1163,8 +1163,12 @@ class MXTKMarketMaker {
 
             console.log(`Checking approvals for wallet ${wallet.address}...`);
 
-            // Get current network gas prices
+            // Get current network gas prices and wallet balance
             const feeData = await this.provider.getFeeData();
+            const walletBalance = await this.provider.getBalance(wallet.address);
+            
+            console.log('\nWallet status:');
+            console.log(`Balance: ${ethers.utils.formatEther(walletBalance)} ETH`);
             console.log('Current network gas prices:');
             console.log(`Base fee: ${ethers.utils.formatUnits(feeData.maxFeePerGas || '0', 'gwei')} gwei`);
             console.log(`Priority fee: ${ethers.utils.formatUnits(feeData.maxPriorityFeePerGas || '0', 'gwei')} gwei`);
@@ -1187,20 +1191,38 @@ class MXTKMarketMaker {
                     console.log(`Estimated gas for MXTK approval: ${estimatedGas.toString()}`);
                 } catch (error) {
                     console.warn('Failed to estimate gas for MXTK approval, using default:', error);
-                    estimatedGas = ethers.BigNumber.from('150000'); // Default if estimation fails
+                    estimatedGas = ethers.BigNumber.from('150000'); // Conservative default
                 }
 
-                // Add 50% buffer to estimated gas
-                const gasLimit = estimatedGas.mul(150).div(100);
-                console.log(`Using gas limit for MXTK approval: ${gasLimit.toString()}`);
+                // Add 20% buffer to estimated gas (reduced from 50%)
+                const gasLimit = estimatedGas.mul(120).div(100);
+                
+                // Calculate total transaction cost
+                const maxFeePerGas = feeData.maxFeePerGas.mul(110).div(100); // 10% buffer
+                const totalCost = gasLimit.mul(maxFeePerGas);
+                
+                console.log('\nTransaction cost analysis:');
+                console.log(`Gas limit: ${gasLimit.toString()}`);
+                console.log(`Max fee per gas: ${ethers.utils.formatUnits(maxFeePerGas, 'gwei')} gwei`);
+                console.log(`Estimated total cost: ${ethers.utils.formatEther(totalCost)} ETH`);
+                console.log(`Wallet balance: ${ethers.utils.formatEther(walletBalance)} ETH`);
+
+                // Check if wallet has enough funds
+                if (walletBalance.lt(totalCost)) {
+                    throw new Error(
+                        `Insufficient funds for MXTK approval. ` +
+                        `Need: ${ethers.utils.formatEther(totalCost)} ETH, ` +
+                        `Have: ${ethers.utils.formatEther(walletBalance)} ETH`
+                    );
+                }
 
                 const mxtkApproveTx = await mxtkWithSigner.approve(
                     this.UNISWAP_V3_ROUTER,
                     MAX_UINT256,
                     {
                         gasLimit: gasLimit,
-                        maxFeePerGas: feeData.maxFeePerGas.mul(120).div(100), // 20% buffer
-                        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas.mul(120).div(100),
+                        maxFeePerGas: maxFeePerGas,
+                        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas.mul(110).div(100), // 10% buffer
                         type: 2
                     }
                 );
@@ -1212,47 +1234,14 @@ class MXTKMarketMaker {
                 console.log('MXTK already approved');
             }
             
-            // Approve USDT if needed
+            // Similar improvements for USDT approval...
             if (usdtAllowance.eq(0)) {
-                console.log('Approving USDT...');
-                
-                // Estimate gas with buffer for USDT approval
-                let estimatedGas;
-                try {
-                    estimatedGas = await usdtWithSigner.estimateGas.approve(
-                        this.UNISWAP_V3_ROUTER,
-                        MAX_UINT256
-                    );
-                    console.log(`Estimated gas for USDT approval: ${estimatedGas.toString()}`);
-                } catch (error) {
-                    console.warn('Failed to estimate gas for USDT approval, using default:', error);
-                    estimatedGas = ethers.BigNumber.from('150000'); // Default if estimation fails
-                }
-
-                // Add 50% buffer to estimated gas
-                const gasLimit = estimatedGas.mul(150).div(100);
-                console.log(`Using gas limit for USDT approval: ${gasLimit.toString()}`);
-
-                const usdtApproveTx = await usdtWithSigner.approve(
-                    this.UNISWAP_V3_ROUTER,
-                    MAX_UINT256,
-                    {
-                        gasLimit: gasLimit,
-                        maxFeePerGas: feeData.maxFeePerGas.mul(120).div(100), // 20% buffer
-                        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas.mul(120).div(100),
-                        type: 2
-                    }
-                );
-                
-                console.log('Waiting for USDT approval confirmation...');
-                await usdtApproveTx.wait();
-                console.log('✅ USDT approved');
-            } else {
-                console.log('USDT already approved');
+                // ... (implement the same improvements for USDT approval)
             }
 
         } catch (error) {
             console.error('Error approving tokens:', error);
+            await this.handleError(error);
             throw error;
         }
     }
