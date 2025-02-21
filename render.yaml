@@ -23,9 +23,15 @@ services:
       - key: ALERT_TO_EMAIL
         value: aiupd25@gmail.com
     disk:
-      name: logs
-      mountPath: /app/logs
-      sizeGB: 10
-      mountOptions:
-        - uid=1000
-        - gid=1000 
+      - name: logs
+        mountPath: /app/logs
+        sizeGB: 10
+        mountOptions:
+          - uid=1000
+          - gid=1000
+      - name: data
+        mountPath: /app/data
+        sizeGB: 1
+        mountOptions:
+          - uid=1000
+          - gid=1000 
