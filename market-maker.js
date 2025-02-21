@@ -1064,18 +1064,25 @@ Transaction (if any): ${JSON.stringify(error.transaction || {}, null, 2)}
 
     async initialize() {
         try {
-            // Initialize provider and other services
+            // Initialize provider and contracts
             await this.initializeProvider();
             await this.initializeContracts();
+
+            // Initialize Moralis
             await Moralis.start({
                 apiKey: process.env.MORALIS_API_KEY
             });
 
             // Initialize wallet manager with persistence
-            this.walletManager = new WalletManager();
+            this.walletManager = new WalletManager({
+                dataDir: path.join(this.DATA_DIR, 'wallets')
+            });
             await this.loadWallets();
 
-            // ... rest of initialization code ...
+            // Initialize monitoring systems
+            await this.initializeMonitoring();
+
+            logger.info('Market maker initialized successfully');
         } catch (error) {
             logger.error('Error during initialization:', error);
             throw error;
@@ -1207,6 +1214,70 @@ Transaction (if any): ${JSON.stringify(error.transaction || {}, null, 2)}
             };
         } catch (error) {
             console.error('Error checking transaction feasibility:', error);
+            throw error;
+        }
+    }
+
+    async initializeProvider() {
+        try {
+            logger.info('Initializing provider...');
+            
+            // Initialize the provider with Arbitrum network
+            const providerUrl = process.env.ARBITRUM_RPC_URL;
+            if (!providerUrl) {
+                throw new Error('ARBITRUM_RPC_URL not configured');
+            }
+
+            this.provider = new ethers.providers.JsonRpcProvider(providerUrl);
+            
+            // Test provider connection
+            await this.provider.getNetwork();
+            logger.info('Provider initialized successfully');
+        } catch (error) {
+            logger.error('Failed to initialize provider:', error);
+            throw error;
+        }
+    }
+
+    async initializeContracts() {
+        try {
+            logger.info('Initializing contracts...');
+            
+            // Initialize MXTK contract
+            this.mxtkContract = new ethers.Contract(
+                this.MXTK_ADDRESS,
+                [
+                    'function balanceOf(address) view returns (uint256)',
+                    'function allowance(address,address) view returns (uint256)',
+                    'function approve(address,uint256) returns (bool)',
+                    'function transfer(address,uint256) returns (bool)',
+                    'function decimals() view returns (uint8)'
+                ],
+                this.provider
+            );
+
+            // Initialize USDT contract
+            this.usdtContract = new ethers.Contract(
+                this.USDT_ADDRESS,
+                [
+                    'function balanceOf(address) view returns (uint256)',
+                    'function allowance(address,address) view returns (uint256)',
+                    'function approve(address,uint256) returns (bool)',
+                    'function transfer(address,uint256) returns (bool)',
+                    'function decimals() view returns (uint8)'
+                ],
+                this.provider
+            );
+
+            // Get token decimals
+            this.mxtkDecimals = await this.mxtkContract.decimals();
+            this.usdtDecimals = await this.usdtContract.decimals();
+
+            logger.info('Contracts initialized successfully');
+            logger.info(`MXTK decimals: ${this.mxtkDecimals}`);
+            logger.info(`USDT decimals: ${this.usdtDecimals}`);
+        } catch (error) {
+            logger.error('Failed to initialize contracts:', error);
             throw error;
         }
     }
