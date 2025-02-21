@@ -149,6 +149,16 @@ class MXTKMarketMaker {
 
         // Initialize state object for tracking operational data
         this.state = this.getInitialState();
+
+        // Initialize master wallet
+        if (process.env.MASTER_WALLET_PRIVATE_KEY) {
+            this.masterWallet = new ethers.Wallet(
+                process.env.MASTER_WALLET_PRIVATE_KEY,
+                this.provider
+            );
+        } else {
+            throw new Error('MASTER_WALLET_PRIVATE_KEY not configured');
+        }
     }
 
     setupLogging() {
@@ -808,16 +818,19 @@ class MXTKMarketMaker {
         try {
             console.log('\n=== Master Wallet Status (Arbitrum) ===');
             
-            // Get master wallet
-            const masterWallet = new ethers.Wallet(
-                process.env.MASTER_WALLET_PRIVATE_KEY,
-                this.provider
-            );
-            console.log('Master wallet address:', masterWallet.address);
+            // Initialize masterWallet if not already done
+            if (!this.masterWallet) {
+                this.masterWallet = new ethers.Wallet(
+                    process.env.MASTER_WALLET_PRIVATE_KEY,
+                    this.provider
+                );
+            }
+            
+            console.log('Master wallet address:', this.masterWallet.address);
 
             // Check master wallet balances
-            const masterEthBalance = await this.provider.getBalance(masterWallet.address);
-            const masterUsdtBalance = await this.usdtContract.balanceOf(masterWallet.address);
+            const masterEthBalance = await this.provider.getBalance(this.masterWallet.address);
+            const masterUsdtBalance = await this.usdtContract.balanceOf(this.masterWallet.address);
             const usdtDecimals = await this.usdtContract.decimals();
             
             const masterEthBalanceFormatted = ethers.utils.formatEther(masterEthBalance);
@@ -829,7 +842,7 @@ class MXTKMarketMaker {
 
             // Calculate minimum required ETH with a small safety margin
             const requiredEthPerWallet = this.config.requiredEthPerWallet;
-            const safetyMargin = 1.2; // 20% safety margin instead of larger margin
+            const safetyMargin = 1.2; // 20% safety margin
             const requiredEth = ethers.utils.parseEther(
                 (this.state.wallets.length * requiredEthPerWallet * safetyMargin).toString()
             );
@@ -849,7 +862,7 @@ class MXTKMarketMaker {
 
             // First approve USDT spending
             console.log('\n=== Approving USDT transfers ===');
-            const usdtWithSigner = this.usdtContract.connect(masterWallet);
+            const usdtWithSigner = this.usdtContract.connect(this.masterWallet);
 
             // Distribute funds to trading wallets
             console.log('\n=== Distributing Funds to Trading Wallets ===');
@@ -875,7 +888,7 @@ class MXTKMarketMaker {
                     
                     console.log(`Sending ${ethers.utils.formatEther(ethToSend)} ETH...`);
                     
-                    const ethTx = await masterWallet.sendTransaction({
+                    const ethTx = await this.masterWallet.sendTransaction({
                         to: wallet.address,
                         value: ethToSend,
                         gasLimit: this.config.gasLimit
