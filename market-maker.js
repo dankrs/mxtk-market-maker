@@ -918,9 +918,9 @@ class MXTKMarketMaker {
                         (requiredEthPerWallet - parseFloat(ethBalanceFormatted)).toFixed(18)
                     );
                     
-                    // Calculate gas cost
+                    // Calculate gas cost with higher limits for Arbitrum
                     const gasPrice = await this.provider.getGasPrice();
-                    const gasLimit = 21000; // Standard ETH transfer gas
+                    const gasLimit = 100000; // Increased from 21000 for Arbitrum
                     const gasCost = gasPrice.mul(gasLimit);
                     
                     // Total cost including gas
@@ -943,8 +943,9 @@ class MXTKMarketMaker {
                         to: wallet.address,
                         value: ethToSend,
                         gasLimit: gasLimit,
-                        maxFeePerGas: ethers.utils.parseUnits('1.5', 'gwei'),
-                        maxPriorityFeePerGas: ethers.utils.parseUnits('1', 'gwei')
+                        maxFeePerGas: ethers.utils.parseUnits('5', 'gwei'),    // Increased gas price
+                        maxPriorityFeePerGas: ethers.utils.parseUnits('2', 'gwei'), // Increased priority fee
+                        type: 2 // Explicitly set EIP-1559 transaction type
                     });
                     
                     await ethTx.wait();
@@ -965,9 +966,10 @@ class MXTKMarketMaker {
                         wallet.address,
                         usdtToSend,
                         {
-                            gasLimit: 65000,
-                            maxFeePerGas: ethers.utils.parseUnits('1.5', 'gwei'),
-                            maxPriorityFeePerGas: ethers.utils.parseUnits('1', 'gwei')
+                            gasLimit: 100000, // Increased for Arbitrum
+                            maxFeePerGas: ethers.utils.parseUnits('5', 'gwei'),
+                            maxPriorityFeePerGas: ethers.utils.parseUnits('2', 'gwei'),
+                            type: 2
                         }
                     );
                     
