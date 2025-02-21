@@ -789,16 +789,22 @@ class MXTKMarketMaker {
         try {
             logger.error('Critical error encountered:', error);
             
-            // Send alert email
-            await this.sendAlertEmail('Critical Error', 
-                `Market maker encountered a critical error:\n${error.message}\n\nStack trace:\n${error.stack}`
-            );
+            // Send alert email with more detailed information
+            const errorDetails = `
+Error Type: ${error.name}
+Message: ${error.message}
+Code: ${error.code}
+Stack: ${error.stack}
+Transaction (if any): ${JSON.stringify(error.transaction || {}, null, 2)}
+            `;
+            
+            await this.sendAlertEmail('Critical Error', errorDetails);
             
             // If it's a critical error, initiate shutdown
             if (this.isCriticalError(error)) {
                 logger.error('Critical error detected, initiating shutdown...');
                 await this.shutdown();
-                process.exit(1);
+                process.exit(1); // Force exit on critical errors
             }
         } catch (alertError) {
             logger.error('Error handling critical error:', alertError);
@@ -816,8 +822,30 @@ class MXTKMarketMaker {
             error.message.includes('network disconnected'),
             error.code === 'NETWORK_ERROR',
             error.code === 'UNPREDICTABLE_GAS_LIMIT',
-            error.code === 'INSUFFICIENT_FUNDS'
+            error.code === 'INSUFFICIENT_FUNDS',
+            
+            // Add new gas-related conditions
+            error.message.includes('intrinsic gas too low'),
+            error.message.includes('gas required exceeds allowance'),
+            error.message.includes('insufficient funds for gas'),
+            error.message.includes('gas limit reached'),
+            
+            // Check for transaction underpriced
+            error.message.includes('transaction underpriced'),
+            error.message.includes('replacement fee too low'),
+            
+            // Check for RPC errors that might indicate gas issues
+            error.message.includes('execution reverted'),
+            error.message.includes('cannot estimate gas')
         ];
+        
+        // Also check nested error objects
+        if (error.error && error.error.message) {
+            criticalConditions.push(
+                error.error.message.includes('insufficient funds'),
+                error.error.message.includes('intrinsic gas too low')
+            );
+        }
         
         return criticalConditions.some(condition => condition);
     }
@@ -1181,48 +1209,29 @@ class MXTKMarketMaker {
             if (mxtkAllowance.eq(0)) {
                 console.log('Approving MXTK...');
                 
-                // Estimate gas with buffer for MXTK approval
-                let estimatedGas;
+                // Estimate gas
+                let estimatedGas = ethers.BigNumber.from('150000');
                 try {
                     estimatedGas = await mxtkWithSigner.estimateGas.approve(
                         this.UNISWAP_V3_ROUTER,
                         MAX_UINT256
                     );
-                    console.log(`Estimated gas for MXTK approval: ${estimatedGas.toString()}`);
+                    estimatedGas = estimatedGas.mul(120).div(100); // 20% buffer
                 } catch (error) {
-                    console.warn('Failed to estimate gas for MXTK approval, using default:', error);
-                    estimatedGas = ethers.BigNumber.from('150000'); // Conservative default
+                    console.warn('Failed to estimate gas, using default:', error);
                 }
 
-                // Add 20% buffer to estimated gas (reduced from 50%)
-                const gasLimit = estimatedGas.mul(120).div(100);
-                
-                // Calculate total transaction cost
-                const maxFeePerGas = feeData.maxFeePerGas.mul(110).div(100); // 10% buffer
-                const totalCost = gasLimit.mul(maxFeePerGas);
-                
-                console.log('\nTransaction cost analysis:');
-                console.log(`Gas limit: ${gasLimit.toString()}`);
-                console.log(`Max fee per gas: ${ethers.utils.formatUnits(maxFeePerGas, 'gwei')} gwei`);
-                console.log(`Estimated total cost: ${ethers.utils.formatEther(totalCost)} ETH`);
-                console.log(`Wallet balance: ${ethers.utils.formatEther(walletBalance)} ETH`);
-
-                // Check if wallet has enough funds
-                if (walletBalance.lt(totalCost)) {
-                    throw new Error(
-                        `Insufficient funds for MXTK approval. ` +
-                        `Need: ${ethers.utils.formatEther(totalCost)} ETH, ` +
-                        `Have: ${ethers.utils.formatEther(walletBalance)} ETH`
-                    );
-                }
+                // Check if transaction is feasible
+                const { maxFeePerGas, maxPriorityFeePerGas } = 
+                    await this.checkTransactionFeasibility(wallet, estimatedGas);
 
                 const mxtkApproveTx = await mxtkWithSigner.approve(
                     this.UNISWAP_V3_ROUTER,
                     MAX_UINT256,
                     {
-                        gasLimit: gasLimit,
-                        maxFeePerGas: maxFeePerGas,
-                        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas.mul(110).div(100), // 10% buffer
+                        gasLimit: estimatedGas,
+                        maxFeePerGas,
+                        maxPriorityFeePerGas,
                         type: 2
                     }
                 );
@@ -1335,6 +1344,43 @@ class MXTKMarketMaker {
             logger.info('Market maker shutdown complete');
         } catch (error) {
             logger.error('Error during shutdown:', error);
+            throw error;
+        }
+    }
+
+    async checkTransactionFeasibility(wallet, estimatedGas, value = 0) {
+        try {
+            const feeData = await this.provider.getFeeData();
+            const walletBalance = await this.provider.getBalance(wallet.address);
+            
+            // Calculate total cost (gas + value to send)
+            const maxFeePerGas = feeData.maxFeePerGas.mul(110).div(100); // 10% buffer
+            const gasCost = estimatedGas.mul(maxFeePerGas);
+            const totalCost = gasCost.add(value);
+            
+            console.log('\nTransaction feasibility analysis:');
+            console.log(`Gas limit: ${estimatedGas.toString()}`);
+            console.log(`Max fee per gas: ${ethers.utils.formatUnits(maxFeePerGas, 'gwei')} gwei`);
+            console.log(`Gas cost: ${ethers.utils.formatEther(gasCost)} ETH`);
+            console.log(`Value to send: ${ethers.utils.formatEther(value)} ETH`);
+            console.log(`Total cost: ${ethers.utils.formatEther(totalCost)} ETH`);
+            console.log(`Wallet balance: ${ethers.utils.formatEther(walletBalance)} ETH`);
+
+            if (walletBalance.lt(totalCost)) {
+                throw new Error(
+                    `Insufficient funds for transaction. ` +
+                    `Need: ${ethers.utils.formatEther(totalCost)} ETH, ` +
+                    `Have: ${ethers.utils.formatEther(walletBalance)} ETH`
+                );
+            }
+
+            return {
+                maxFeePerGas,
+                maxPriorityFeePerGas: feeData.maxPriorityFeePerGas.mul(110).div(100),
+                estimatedGas
+            };
+        } catch (error) {
+            console.error('Error checking transaction feasibility:', error);
             throw error;
         }
     }
