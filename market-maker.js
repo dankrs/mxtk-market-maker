@@ -918,12 +918,33 @@ class MXTKMarketMaker {
                         (requiredEthPerWallet - parseFloat(ethBalanceFormatted)).toFixed(18)
                     );
                     
+                    // Calculate gas cost
+                    const gasPrice = await this.provider.getGasPrice();
+                    const gasLimit = 21000; // Standard ETH transfer gas
+                    const gasCost = gasPrice.mul(gasLimit);
+                    
+                    // Total cost including gas
+                    const totalCost = ethToSend.add(gasCost);
+                    
+                    // Check if master wallet has enough for transfer + gas
+                    const masterBalance = await this.provider.getBalance(this.masterWallet.address);
+                    if (masterBalance.lt(totalCost)) {
+                        throw new Error(
+                            `Insufficient ETH in master wallet for transfer + gas. ` +
+                            `Need: ${ethers.utils.formatEther(totalCost)} ETH, ` +
+                            `Have: ${ethers.utils.formatEther(masterBalance)} ETH`
+                        );
+                    }
+                    
                     console.log(`Sending ${ethers.utils.formatEther(ethToSend)} ETH...`);
+                    console.log(`Estimated gas cost: ${ethers.utils.formatEther(gasCost)} ETH`);
                     
                     const ethTx = await this.masterWallet.sendTransaction({
                         to: wallet.address,
                         value: ethToSend,
-                        gasLimit: this.config.gasLimit
+                        gasLimit: gasLimit,
+                        maxFeePerGas: ethers.utils.parseUnits('1.5', 'gwei'),
+                        maxPriorityFeePerGas: ethers.utils.parseUnits('1', 'gwei')
                     });
                     
                     await ethTx.wait();
@@ -943,7 +964,11 @@ class MXTKMarketMaker {
                     const usdtTx = await usdtWithSigner.transfer(
                         wallet.address,
                         usdtToSend,
-                        { gasLimit: this.config.gasLimit }
+                        {
+                            gasLimit: 65000,
+                            maxFeePerGas: ethers.utils.parseUnits('1.5', 'gwei'),
+                            maxPriorityFeePerGas: ethers.utils.parseUnits('1', 'gwei')
+                        }
                     );
                     
                     await usdtTx.wait();
