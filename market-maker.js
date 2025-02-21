@@ -69,7 +69,8 @@ class MXTKMarketMaker {
                 max: 1.0    // 1.0 USDT maximum
             },
             gasLimit: parseInt(process.env.GAS_LIMIT) || 300000,
-            maxGasPrice: parseInt(process.env.MAX_GAS_PRICE) || 100
+            maxGasPrice: parseInt(process.env.MAX_GAS_PRICE) || 100,
+            requiredEthPerWallet: parseFloat(process.env.REQUIRED_ETH_PER_WALLET) || 0.0002
         };
 
         // Flag for tracking update operations
@@ -826,20 +827,24 @@ class MXTKMarketMaker {
             console.log(`ETH: ${masterEthBalanceFormatted} ETH`);
             console.log(`USDT: ${masterUsdtBalanceFormatted} USDT`);
 
-            // Calculate required balances
-            const requiredEthPerWallet = 0.001; // 0.001 ETH per wallet
-            const requiredUsdtPerWallet = 1; // 1 USDT per wallet
-            const totalWallets = this.state.wallets.length;
-            const totalRequiredEth = requiredEthPerWallet * totalWallets;
-            const totalRequiredUsdt = requiredUsdtPerWallet * totalWallets;
+            // Calculate minimum required ETH with a small safety margin
+            const requiredEthPerWallet = this.config.requiredEthPerWallet;
+            const safetyMargin = 1.2; // 20% safety margin instead of larger margin
+            const requiredEth = ethers.utils.parseEther(
+                (this.state.wallets.length * requiredEthPerWallet * safetyMargin).toString()
+            );
 
-            // Validate master wallet has sufficient funds
-            if (parseFloat(masterEthBalanceFormatted) < totalRequiredEth) {
-                throw new Error(`Insufficient ETH in master wallet. Need: ${totalRequiredEth} ETH, Have: ${masterEthBalanceFormatted} ETH`);
+            const masterBalance = await this.provider.getBalance(this.masterWallet.address);
+            
+            if (masterBalance.lt(requiredEth)) {
+                throw new Error(
+                    `Insufficient ETH in master wallet. Need: ${ethers.utils.formatEther(requiredEth)} ETH, ` +
+                    `Have: ${ethers.utils.formatEther(masterBalance)} ETH`
+                );
             }
             
-            if (parseFloat(masterUsdtBalanceFormatted) < totalRequiredUsdt) {
-                throw new Error(`Insufficient USDT in master wallet. Need: ${totalRequiredUsdt} USDT, Have: ${masterUsdtBalanceFormatted} USDT`);
+            if (parseFloat(masterUsdtBalanceFormatted) < 1) {
+                throw new Error(`Insufficient USDT in master wallet. Need: 1 USDT, Have: ${masterUsdtBalanceFormatted} USDT`);
             }
 
             // First approve USDT spending
@@ -881,9 +886,9 @@ class MXTKMarketMaker {
                 }
 
                 // Send USDT if needed
-                if (parseFloat(usdtBalanceFormatted) < requiredUsdtPerWallet) {
+                if (parseFloat(usdtBalanceFormatted) < 1) {
                     const usdtToSend = ethers.utils.parseUnits(
-                        (requiredUsdtPerWallet - parseFloat(usdtBalanceFormatted)).toFixed(6),
+                        (1 - parseFloat(usdtBalanceFormatted)).toFixed(6),
                         usdtDecimals
                     );
                     
