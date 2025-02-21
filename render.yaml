@@ -13,7 +13,7 @@ services:
       - key: SMTP_HOST
         value: smtp.gmail.com
       - key: SMTP_PORT
-        value: 587
+        value: "587"
       - key: SMTP_USER
         value: aiupd25@gmail.com
       - key: SMTP_PASS

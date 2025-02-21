@@ -159,6 +159,33 @@ class MXTKMarketMaker {
         } else {
             throw new Error('MASTER_WALLET_PRIVATE_KEY not configured');
         }
+
+        // Initialize email transport if SMTP settings are configured
+        if (process.env.SMTP_HOST && 
+            process.env.SMTP_PORT && 
+            process.env.SMTP_USER && 
+            process.env.SMTP_PASS) {
+            this.emailTransport = nodemailer.createTransport({
+                host: process.env.SMTP_HOST,
+                port: parseInt(process.env.SMTP_PORT),
+                secure: process.env.SMTP_PORT === '465', // true for 465, false for other ports
+                auth: {
+                    user: process.env.SMTP_USER,
+                    pass: process.env.SMTP_PASS
+                }
+            });
+            
+            // Verify email transport configuration
+            this.emailTransport.verify((error, success) => {
+                if (error) {
+                    console.error('Email transport verification failed:', error);
+                } else {
+                    console.log('Email transport ready');
+                }
+            });
+        } else {
+            console.warn('Email alerts disabled: SMTP configuration missing');
+        }
     }
 
     setupLogging() {
@@ -283,23 +310,23 @@ class MXTKMarketMaker {
     }
 
     async sendAlert(subject, message) {
-        if (!this.emailTransport) {
-            console.warn('Cannot send alert: Email transport not configured');
-            return;
-        }
-
         try {
+            if (!this.emailTransport) {
+                console.warn('Cannot send alert: Email transport not configured');
+                return;
+            }
+
             const mailOptions = {
                 from: process.env.ALERT_FROM_EMAIL,
                 to: process.env.ALERT_TO_EMAIL,
-                subject: `MXTK Market Maker: ${subject}`,
+                subject: `MXTK Market Maker Alert: ${subject}`,
                 text: message
             };
 
             await this.emailTransport.sendMail(mailOptions);
-            console.log(`✅ Alert sent: ${subject}`);
+            console.log('Alert email sent successfully');
         } catch (error) {
-            console.error('Failed to send email alert:', error);
+            console.error('Failed to send alert email:', error);
         }
     }
 
