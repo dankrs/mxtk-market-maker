@@ -1111,34 +1111,42 @@ class MXTKMarketMaker {
                 wallet.address,
                 this.UNISWAP_V3_ROUTER
             );
-
+            
             // Check current USDT allowance
             const usdtAllowance = await this.usdtContract.allowance(
                 wallet.address,
                 this.UNISWAP_V3_ROUTER
             );
-
+            
             // Approve MXTK if needed
             if (mxtkAllowance.eq(0)) {
                 console.log('Approving MXTK...');
                 const mxtkApproveTx = await mxtkWithSigner.approve(
                     this.UNISWAP_V3_ROUTER,
                     MAX_UINT256,
-                    { gasLimit: 100000 }
+                    {
+                        gasLimit: 62500,  // Increased from 100000
+                        maxFeePerGas: ethers.utils.parseUnits('1.5', 'gwei'),
+                        maxPriorityFeePerGas: ethers.utils.parseUnits('1', 'gwei')
+                    }
                 );
                 await mxtkApproveTx.wait();
                 console.log('✅ MXTK approved');
             } else {
                 console.log('MXTK already approved');
             }
-
+            
             // Approve USDT if needed
             if (usdtAllowance.eq(0)) {
                 console.log('Approving USDT...');
                 const usdtApproveTx = await usdtWithSigner.approve(
                     this.UNISWAP_V3_ROUTER,
                     MAX_UINT256,
-                    { gasLimit: 100000 }
+                    {
+                        gasLimit: 62500,  // Increased from 100000
+                        maxFeePerGas: ethers.utils.parseUnits('1.5', 'gwei'),
+                        maxPriorityFeePerGas: ethers.utils.parseUnits('1', 'gwei')
+                    }
                 );
                 await usdtApproveTx.wait();
                 console.log('✅ USDT approved');
