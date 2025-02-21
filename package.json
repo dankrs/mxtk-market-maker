@@ -3,7 +3,12 @@
   "version": "1.0.0",
   "description": "mxtk-market-maker-bot",
   "main": "index.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -20,6 +25,11 @@
     "ethers": "^5.7.2",
     "express": "^4.21.2",
     "moralis": "^2.27.2",
-    "nodemailer": "^6.10.0"
+    "nodemailer": "^6.10.0",
+    "winston": "^3.11.0",
+    "winston-daily-rotate-file": "^5.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
   }
 }

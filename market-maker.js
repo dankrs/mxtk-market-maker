@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const WalletManager = require('./wallet-manager');
 const util = require('util');
+const logger = require('./utils/logger');
 
 class MXTKMarketMaker {
     constructor(config) {
@@ -151,62 +152,23 @@ class MXTKMarketMaker {
 
     setupLogging() {
         try {
-            // Create logs directory if it doesn't exist
-            const logsDir = path.join(__dirname, 'logs');
-            if (!fs.existsSync(logsDir)) {
-                fs.mkdirSync(logsDir);
-            }
-
-            // Create log file with timestamp in name
-            const date = new Date().toISOString().split('T')[0];
-            const logFile = path.join(logsDir, `market-maker-${date}.log`);
-            
-            // Create write stream for logging
-            const logStream = fs.createWriteStream(logFile, { flags: 'a' });
-            
-            // Override console.log
+            // Override console.log and console.error with our logger
             const originalConsoleLog = console.log;
             console.log = (...args) => {
-                const timestamp = new Date().toISOString();
-                const message = util.format(...args);
-                const logMessage = `[${timestamp}] ${message}\n`;
-                
-                // Write to file
-                logStream.write(logMessage);
-                
-                // Write to console with original formatting
+                logger.info(util.format(...args));
                 originalConsoleLog.apply(console, args);
             };
 
-            // Override console.error
             const originalConsoleError = console.error;
             console.error = (...args) => {
-                const timestamp = new Date().toISOString();
-                const message = util.format(...args);
-                const logMessage = `[${timestamp}] ERROR: ${message}\n`;
-                
-                // Write to file
-                logStream.write(logMessage);
-                
-                // Write to console with original formatting
+                logger.error(util.format(...args));
                 originalConsoleError.apply(console, args);
             };
 
-            // Handle process termination
-            process.on('exit', () => {
-                logStream.end();
-            });
-
-            process.on('SIGINT', () => {
-                logStream.end();
-                process.exit();
-            });
-
-            console.log('Logging system initialized');
-            console.log(`Logs will be written to: ${logFile}`);
+            logger.info('Logging system initialized');
 
         } catch (error) {
-            console.error('Error setting up logging:', error);
+            logger.error('Error setting up logging:', error);
             throw error;
         }
     }
