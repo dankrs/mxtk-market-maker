@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: mxtk-market-maker
+    env: docker
+    region: ohio
+    plan: standard
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+    disk:
+      name: logs
+      mountPath: /app/logs
+      sizeGB: 10 

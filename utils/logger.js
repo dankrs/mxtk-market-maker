@@ -27,18 +27,15 @@ const logger = winston.createLogger({
 // Add file transport only in production
 if (process.env.NODE_ENV === 'production') {
     logger.add(new DailyRotateFile({
-        filename: '/tmp/logs/mxtk-market-maker-%DATE%.log',
+        filename: '/app/logs/mxtk-market-maker-%DATE%.log',
         datePattern: 'YYYY-MM-DD',
         maxSize: '20m',
         maxFiles: '14d',
         format: logFormat
     }));
-}
 
-// Add error logging to a separate file in production
-if (process.env.NODE_ENV === 'production') {
     logger.add(new DailyRotateFile({
-        filename: '/tmp/logs/mxtk-market-maker-error-%DATE%.log',
+        filename: '/app/logs/mxtk-market-maker-error-%DATE%.log',
         datePattern: 'YYYY-MM-DD',
         maxSize: '20m',
         maxFiles: '14d',

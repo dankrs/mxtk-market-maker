@@ -3,6 +3,8 @@ require('dotenv').config();
 const express = require('express');
 const MXTKMarketMaker = require('./market-maker');
 const logger = require('./utils/logger');
+const fs = require('fs');
+const { DailyRotateFile } = require('winston-daily-rotate-file');
 
 // Add process error handlers
 process.on('uncaughtException', (error) => {
@@ -53,8 +55,8 @@ async function startBot() {
 
     // Start the server first
     await new Promise((resolve) => {
-        app.listen(port, () => {
-            logger.info(`Server listening at http://localhost:${port}`);
+        app.listen(port, '0.0.0.0', () => {
+            logger.info(`Server listening at http://0.0.0.0:${port}`);
             resolve();
         });
     });
