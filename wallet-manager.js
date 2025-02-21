@@ -20,6 +20,7 @@ class WalletManager {
             fs.mkdirSync(this.dataDir, { recursive: true });
         }
         this.wallets = [];
+        this.currentIndex = 0;
     }
 
     /**
@@ -84,6 +85,25 @@ class WalletManager {
             console.error(`Error getting private key for wallet ${address}:`, error);
             throw error;
         }
+    }
+
+    addWallet(wallet) {
+        if (!this.wallets.find(w => w.address === wallet.address)) {
+            this.wallets.push(wallet);
+        }
+    }
+
+    getWallets() {
+        return this.wallets;
+    }
+
+    getNextWallet() {
+        if (this.wallets.length === 0) {
+            throw new Error('No wallets available');
+        }
+        const wallet = this.wallets[this.currentIndex];
+        this.currentIndex = (this.currentIndex + 1) % this.wallets.length;
+        return wallet;
     }
 }
 

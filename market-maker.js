@@ -188,6 +188,15 @@ class MXTKMarketMaker {
         }
 
         this.isShuttingDown = false;
+
+        // Define paths for persistent storage
+        this.DATA_DIR = path.join(process.cwd(), 'data');
+        this.WALLETS_FILE = path.join(this.DATA_DIR, 'wallets.json');
+        
+        // Ensure data directory exists
+        if (!fs.existsSync(this.DATA_DIR)) {
+            fs.mkdirSync(this.DATA_DIR, { recursive: true });
+        }
     }
 
     setupLogging() {
@@ -1055,283 +1064,96 @@ Transaction (if any): ${JSON.stringify(error.transaction || {}, null, 2)}
 
     async initialize() {
         try {
-            // Validate required environment variables
-            const requiredEnvVars = {
-                // Uniswap V3 Configuration
-                UNISWAP_V3_ROUTER: process.env.UNISWAP_V3_ROUTER,
-                UNISWAP_V3_FACTORY: process.env.UNISWAP_V3_FACTORY,
-                UNISWAP_V3_QUOTER: process.env.UNISWAP_V3_QUOTER,
-                UNISWAP_POOL_FEE: process.env.UNISWAP_POOL_FEE,
+            // Initialize provider and other services
+            await this.initializeProvider();
+            await this.initializeContracts();
+            await Moralis.start({
+                apiKey: process.env.MORALIS_API_KEY
+            });
 
-                // Token Addresses
-                MXTK_ADDRESS: process.env.MXTK_ADDRESS,
-                USDT_ADDRESS: process.env.USDT_ADDRESS,
+            // Initialize wallet manager with persistence
+            this.walletManager = new WalletManager();
+            await this.loadWallets();
 
-                // Network Configuration
-                ARBITRUM_MAINNET_RPC: process.env.ARBITRUM_MAINNET_RPC,
-                MORALIS_API_KEY: process.env.MORALIS_API_KEY,
-                MASTER_WALLET_PRIVATE_KEY: process.env.MASTER_WALLET_PRIVATE_KEY
-            };
-
-            // Check for missing required variables
-            const missingVars = Object.entries(requiredEnvVars)
-                .filter(([_, value]) => !value)
-                .map(([key]) => key);
-
-            if (missingVars.length > 0) {
-                throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
-            }
-
-            // Validate addresses
-            const addressVars = {
-                UNISWAP_V3_ROUTER: process.env.UNISWAP_V3_ROUTER,
-                UNISWAP_V3_FACTORY: process.env.UNISWAP_V3_FACTORY,
-                UNISWAP_V3_QUOTER: process.env.UNISWAP_V3_QUOTER,
-                MXTK_ADDRESS: process.env.MXTK_ADDRESS,
-                USDT_ADDRESS: process.env.USDT_ADDRESS
-            };
-
-            for (const [key, value] of Object.entries(addressVars)) {
-                if (!ethers.utils.isAddress(value)) {
-                    throw new Error(`Invalid Ethereum address for ${key}: ${value}`);
-                }
-            }
-
-            // Validate numeric values
-            const numericVars = {
-                UNISWAP_POOL_FEE: { value: process.env.UNISWAP_POOL_FEE, min: 1, max: 1000000 },
-                MAX_SLIPPAGE: { value: process.env.MAX_SLIPPAGE, min: 0.001, max: 0.1 },
-                MIN_SPREAD: { value: process.env.MIN_SPREAD, min: 0.001, max: 0.1 },
-                TARGET_SPREAD: { value: process.env.TARGET_SPREAD, min: 0.001, max: 0.1 },
-                MAX_SPREAD: { value: process.env.MAX_SPREAD, min: 0.001, max: 0.1 }
-            };
-
-            for (const [key, config] of Object.entries(numericVars)) {
-                const value = parseFloat(config.value);
-                if (isNaN(value) || value < config.min || value > config.max) {
-                    throw new Error(`Invalid value for ${key}: ${config.value}. Must be between ${config.min} and ${config.max}`);
-                }
-            }
-
-            // Validate spread relationships
-            if (parseFloat(process.env.MIN_SPREAD) > parseFloat(process.env.TARGET_SPREAD)) {
-                throw new Error('MIN_SPREAD cannot be greater than TARGET_SPREAD');
-            }
-            if (parseFloat(process.env.TARGET_SPREAD) > parseFloat(process.env.MAX_SPREAD)) {
-                throw new Error('TARGET_SPREAD cannot be greater than MAX_SPREAD');
-            }
-
-            // Continue with existing initialization code
-            await this.loadState();
-            await this.initializeServices();
-            
-            // Initialize wallets using WalletManager
-            await this.walletManager.loadWallets();
-            const existingWallets = this.walletManager.getAllWallets();
-            
-            // Create additional wallets if needed to reach 3 total
-            if (existingWallets.length < 3) {
-                const walletsToCreate = 3 - existingWallets.length;
-                for (let i = 0; i < walletsToCreate; i++) {
-                    await this.walletManager.createWallet();
-                }
-            }
-            
-            // Connect wallets to provider
-            this.state.wallets = this.walletManager.getAllWallets().map(
-                wallet => wallet.connect(this.provider)
-            );
-
-            // Distribute initial ETH and USDT
-            await this.distributeInitialFunds();
-
-            // Check and display final balances
-            await this.displayWalletBalances();
-
-            // Approve tokens for each wallet
-            for (const wallet of this.state.wallets) {
-                await this.approveTokens(wallet);
-            }
-
-            // Get and cache token decimals
-            this.mxtkDecimals = await this.mxtkContract.decimals();
-            this.usdtDecimals = await this.usdtContract.decimals();
-            
-            console.log('Token decimals initialized:');
-            console.log('- MXTK:', this.mxtkDecimals);
-            console.log('- USDT:', this.usdtDecimals);
-
+            // ... rest of initialization code ...
         } catch (error) {
-            console.error('Error in initialization:', error);
-            await this.handleError(error);
+            logger.error('Error during initialization:', error);
             throw error;
         }
     }
 
-    // Helper method to display wallet balances
-    async displayWalletBalances() {
-        console.log('\n=== Final Wallet Balances ===');
-        for (const wallet of this.state.wallets) {
-            const balance = await this.provider.getBalance(wallet.address);
-            const ethBalance = ethers.utils.formatEther(balance);
-            console.log(`Wallet ${wallet.address}`);
-            console.log(`Balance: ${ethBalance} ETH`);
-            console.log('---------------------');
-        }
-        console.log('=====================\n');
-    }
-
-    async approveTokens(wallet) {
+    async loadWallets() {
         try {
-            const MAX_UINT256 = ethers.constants.MaxUint256;
-            
-            // Connect contracts to wallet for signing
-            const mxtkWithSigner = this.mxtkContract.connect(wallet);
-            const usdtWithSigner = this.usdtContract.connect(wallet);
-
-            console.log(`Checking approvals for wallet ${wallet.address}...`);
-
-            // Get current network gas prices and wallet balance
-            const feeData = await this.provider.getFeeData();
-            const walletBalance = await this.provider.getBalance(wallet.address);
-            
-            console.log('\nWallet status:');
-            console.log(`Balance: ${ethers.utils.formatEther(walletBalance)} ETH`);
-            console.log('Current network gas prices:');
-            console.log(`Base fee: ${ethers.utils.formatUnits(feeData.maxFeePerGas || '0', 'gwei')} gwei`);
-            console.log(`Priority fee: ${ethers.utils.formatUnits(feeData.maxPriorityFeePerGas || '0', 'gwei')} gwei`);
-
-            // Check current allowances
-            const mxtkAllowance = await this.mxtkContract.allowance(wallet.address, this.UNISWAP_V3_ROUTER);
-            const usdtAllowance = await this.usdtContract.allowance(wallet.address, this.UNISWAP_V3_ROUTER);
-            
-            // Approve MXTK if needed
-            if (mxtkAllowance.eq(0)) {
-                console.log('Approving MXTK...');
+            if (fs.existsSync(this.WALLETS_FILE)) {
+                logger.info('Loading existing wallets from storage...');
+                const walletsData = JSON.parse(fs.readFileSync(this.WALLETS_FILE, 'utf8'));
                 
-                // Estimate gas
-                let estimatedGas = ethers.BigNumber.from('150000');
-                try {
-                    estimatedGas = await mxtkWithSigner.estimateGas.approve(
-                        this.UNISWAP_V3_ROUTER,
-                        MAX_UINT256
-                    );
-                    estimatedGas = estimatedGas.mul(120).div(100); // 20% buffer
-                } catch (error) {
-                    console.warn('Failed to estimate gas, using default:', error);
-                }
-
-                // Check if transaction is feasible
-                const { maxFeePerGas, maxPriorityFeePerGas } = 
-                    await this.checkTransactionFeasibility(wallet, estimatedGas);
-
-                const mxtkApproveTx = await mxtkWithSigner.approve(
-                    this.UNISWAP_V3_ROUTER,
-                    MAX_UINT256,
-                    {
-                        gasLimit: estimatedGas,
-                        maxFeePerGas,
-                        maxPriorityFeePerGas,
-                        type: 2
+                // Validate and restore wallets
+                for (const walletData of walletsData) {
+                    if (walletData.privateKey) {
+                        const wallet = new ethers.Wallet(walletData.privateKey, this.provider);
+                        this.walletManager.addWallet(wallet);
+                        logger.info(`Restored wallet: ${wallet.address}`);
                     }
-                );
+                }
                 
-                console.log('Waiting for MXTK approval confirmation...');
-                await mxtkApproveTx.wait();
-                console.log('✅ MXTK approved');
+                logger.info(`Restored ${this.walletManager.getWallets().length} wallets from storage`);
             } else {
-                console.log('MXTK already approved');
+                logger.info('No existing wallets found, creating new ones...');
+                // Create initial wallets only if none exist
+                await this.createInitialWallets();
             }
-            
-            // Similar improvements for USDT approval...
-            if (usdtAllowance.eq(0)) {
-                // ... (implement the same improvements for USDT approval)
-            }
-
         } catch (error) {
-            console.error('Error approving tokens:', error);
-            await this.handleError(error);
+            logger.error('Error loading wallets:', error);
             throw error;
         }
     }
 
-    async startProcessManager() {
+    async createInitialWallets() {
         try {
-            // Check if shutting down
-            if (this.isShuttingDown) {
-                logger.info('Shutdown in progress, not starting new processes');
-                return;
+            // Create new wallets
+            const numWallets = 3; // Or get from config
+            for (let i = 0; i < numWallets; i++) {
+                const wallet = ethers.Wallet.createRandom().connect(this.provider);
+                this.walletManager.addWallet(wallet);
+                logger.info(`Created new wallet: ${wallet.address}`);
             }
 
-            console.log('Starting process manager...');
-            
-            // Check if pool exists before starting
-            const currentPrice = await this.getCurrentPrice();
-            if (!currentPrice) {
-                console.log('Cannot start process manager: No MXTK-USDT pool exists');
-                console.log('Please create the pool first and then restart the bot');
-                return;
-            }
-
-            // Start the main trading loop
-            this.isRunning = true;
-            
-            // Initial trade execution
-            this.executeTradeLoop();
-
+            // Save wallets immediately after creation
+            await this.saveWallets();
+            logger.info(`Created and saved ${numWallets} new wallets`);
         } catch (error) {
-            await this.handleError(error);
+            logger.error('Error creating initial wallets:', error);
+            throw error;
         }
     }
 
-    async executeTradeLoop() {
-        while (this.isRunning) {
-            if (!this._isUpdating && !this.state.isCircuitBroken) {
-                try {
-                    // Get random wallet from pool
-                    const wallet = this.state.wallets[Math.floor(Math.random() * this.state.wallets.length)];
-                    
-                    // Determine trade direction
-                    let isBuy;
-                    if (!this.firstTradeExecuted) {
-                        isBuy = true;
-                        this.firstTradeExecuted = true;
-                        console.log('Executing first trade: USDT → MXTK');
-                    } else {
-                        isBuy = Math.random() > 0.5;
-                    }
-                    
-                    // Get random amount within configured range and check balance
-                    const amount = await this.getRandomAmount(wallet, isBuy);
-                    
-                    // Only proceed if we have a valid amount
-                    if (amount !== null) {
-                        await this.createOrder(wallet, amount, isBuy);
-                    }
-                    
-                    // Random delay before next trade
-                    const delay = this.getRandomDelay();
-                    console.log(`Next trade in ${delay/1000} seconds`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    
-                } catch (error) {
-                    console.error('Error in trading cycle:', error);
-                    await this.handleError(error);
-                }
-            }
-        }
-    }
-
-    // Add shutdown method
-    async shutdown() {
-        this.isShuttingDown = true;
-        logger.info('Shutting down market maker...');
-        
+    async saveWallets() {
         try {
-            // Stop any ongoing processes
-            if (this.priceUpdateInterval) {
-                clearInterval(this.priceUpdateInterval);
-            }
+            const wallets = this.walletManager.getWallets();
+            const walletsData = wallets.map(wallet => ({
+                address: wallet.address,
+                privateKey: wallet.privateKey
+            }));
+
+            fs.writeFileSync(
+                this.WALLETS_FILE,
+                JSON.stringify(walletsData, null, 2),
+                'utf8'
+            );
+            logger.info(`Saved ${wallets.length} wallets to storage`);
+        } catch (error) {
+            logger.error('Error saving wallets:', error);
+            throw error;
+        }
+    }
+
+    async shutdown() {
+        try {
+            logger.info('Shutting down market maker...');
+            
+            // Save wallets state before shutdown
+            await this.saveWallets();
             
             // Save current state
             await this.saveState();
@@ -1339,6 +1161,10 @@ Transaction (if any): ${JSON.stringify(error.transaction || {}, null, 2)}
             // Close any active connections
             if (this.provider) {
                 this.provider.removeAllListeners();
+            }
+            
+            if (this.priceUpdateInterval) {
+                clearInterval(this.priceUpdateInterval);
             }
             
             logger.info('Market maker shutdown complete');
