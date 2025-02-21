@@ -133,3 +133,4 @@ node_modules/
 .secure
 .wallets
 .cursorrules
+logs/

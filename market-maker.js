@@ -17,6 +17,7 @@ const cluster = require('cluster');
 const fs = require('fs');
 const path = require('path');
 const WalletManager = require('./wallet-manager');
+const util = require('util');
 
 class MXTKMarketMaker {
     constructor(config) {
@@ -56,15 +57,15 @@ class MXTKMarketMaker {
             minOrders: 10,
             maxDailyVolume: parseFloat(process.env.MAX_DAILY_VOLUME) || 10,
             circuitBreakerThreshold: parseFloat(process.env.CIRCUIT_BREAKER_THRESHOLD) || 0.10,
-            lowBalanceThreshold: parseFloat(process.env.LOW_BALANCE_THRESHOLD) || 0.1,
+            lowBalanceThreshold: parseFloat(process.env.LOW_BALANCE_THRESHOLD) || 0.002,
             volumeAlertThreshold: parseFloat(process.env.VOLUME_ALERT_THRESHOLD) || 0.8,
             timeRange: {
-                min: parseInt(process.env.MIN_TIME_DELAY) || 60,
-                max: parseInt(process.env.MAX_TIME_DELAY) || 900
+                min: parseInt(process.env.MIN_TIME_DELAY) || 30,    // Default to 30s if not set
+                max: parseInt(process.env.MAX_TIME_DELAY) || 180    // Default to 180s if not set
             },
             amountRange: {
-                min: parseFloat(process.env.MIN_TRADE_AMOUNT) || 0.0005,
-                max: parseFloat(process.env.MAX_TRADE_AMOUNT) || 0.05
+                min: 0.1,   // 0.1 USDT minimum
+                max: 1.0    // 1.0 USDT maximum
             },
             gasLimit: parseInt(process.env.GAS_LIMIT) || 300000,
             maxGasPrice: parseInt(process.env.MAX_GAS_PRICE) || 100
@@ -72,31 +73,6 @@ class MXTKMarketMaker {
 
         // Flag for tracking update operations
         this._isUpdating = false;
-
-        // Instantiate the WalletManager with a data directory for secure wallet storage
-        this.walletManager = new WalletManager({
-            dataDir: path.join(__dirname, '.secure')
-        });
-
-        // Initialize state object for tracking operational data
-        this.state = this.getInitialState();
-
-        // Initialize email transport
-        if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-            this.emailTransport = nodemailer.createTransport({
-                host: process.env.SMTP_HOST,
-                port: parseInt(process.env.SMTP_PORT) || 587,
-                secure: process.env.SMTP_SECURE === 'true',
-                auth: {
-                    user: process.env.SMTP_USER,
-                    pass: process.env.SMTP_PASS
-                }
-            });
-            console.log('✅ Email alerts configured');
-        } else {
-            console.warn('⚠️ Email alerts not configured. Please check SMTP settings in .env file');
-            this.emailTransport = null;
-        }
 
         // Initialize provider
         this.provider = new ethers.providers.JsonRpcProvider(process.env.ARBITRUM_MAINNET_RPC);
@@ -120,7 +96,8 @@ class MXTKMarketMaker {
                 'function approve(address spender, uint256 amount) public returns (bool)',
                 'function allowance(address owner, address spender) public view returns (uint256)',
                 'function balanceOf(address account) public view returns (uint256)',
-                'function decimals() public view returns (uint8)'
+                'function decimals() public view returns (uint8)',
+                'function transfer(address recipient, uint256 amount) public returns (bool)'
             ],
             this.provider
         );
@@ -158,6 +135,80 @@ class MXTKMarketMaker {
         // Initialize token decimals (will be set in initialize())
         this.mxtkDecimals = null;
         this.usdtDecimals = null;
+
+        // Add a flag to track if first trade has been executed
+        this.firstTradeExecuted = false;
+
+        // Set up logging
+        this.setupLogging();
+
+        // Instantiate the WalletManager (simplified)
+        this.walletManager = new WalletManager(this.provider);
+
+        // Initialize state object for tracking operational data
+        this.state = this.getInitialState();
+    }
+
+    setupLogging() {
+        try {
+            // Create logs directory if it doesn't exist
+            const logsDir = path.join(__dirname, 'logs');
+            if (!fs.existsSync(logsDir)) {
+                fs.mkdirSync(logsDir);
+            }
+
+            // Create log file with timestamp in name
+            const date = new Date().toISOString().split('T')[0];
+            const logFile = path.join(logsDir, `market-maker-${date}.log`);
+            
+            // Create write stream for logging
+            const logStream = fs.createWriteStream(logFile, { flags: 'a' });
+            
+            // Override console.log
+            const originalConsoleLog = console.log;
+            console.log = (...args) => {
+                const timestamp = new Date().toISOString();
+                const message = util.format(...args);
+                const logMessage = `[${timestamp}] ${message}\n`;
+                
+                // Write to file
+                logStream.write(logMessage);
+                
+                // Write to console with original formatting
+                originalConsoleLog.apply(console, args);
+            };
+
+            // Override console.error
+            const originalConsoleError = console.error;
+            console.error = (...args) => {
+                const timestamp = new Date().toISOString();
+                const message = util.format(...args);
+                const logMessage = `[${timestamp}] ERROR: ${message}\n`;
+                
+                // Write to file
+                logStream.write(logMessage);
+                
+                // Write to console with original formatting
+                originalConsoleError.apply(console, args);
+            };
+
+            // Handle process termination
+            process.on('exit', () => {
+                logStream.end();
+            });
+
+            process.on('SIGINT', () => {
+                logStream.end();
+                process.exit();
+            });
+
+            console.log('Logging system initialized');
+            console.log(`Logs will be written to: ${logFile}`);
+
+        } catch (error) {
+            console.error('Error setting up logging:', error);
+            throw error;
+        }
     }
 
     getInitialState() {
@@ -225,7 +276,8 @@ class MXTKMarketMaker {
                     'function approve(address spender, uint256 amount) public returns (bool)',
                     'function allowance(address owner, address spender) public view returns (uint256)',
                     'function balanceOf(address account) public view returns (uint256)',
-                    'function decimals() public view returns (uint8)'
+                    'function decimals() public view returns (uint8)',
+                    'function transfer(address recipient, uint256 amount) public returns (bool)'
                 ],
                 this.provider
             );
@@ -459,102 +511,273 @@ class MXTKMarketMaker {
     }
 
     getRandomDelay() {
-        // Return a random delay (in seconds) within the configured range
-        return Math.floor(
+        // Add logging to verify the ranges being used
+        console.log(`Generating random delay between ${this.config.timeRange.min}s and ${this.config.timeRange.max}s`);
+        const delay = Math.floor(
             Math.random() * 
             (this.config.timeRange.max - this.config.timeRange.min + 1) + 
             this.config.timeRange.min
         );
+        console.log(`Selected delay: ${delay}s`);
+        return delay * 1000; // Convert seconds to milliseconds for setTimeout
     }
 
-    getRandomAmount() {
-        // Return a random trade amount within the specified range
-        return Math.random() * 
-            (this.config.amountRange.max - this.config.amountRange.min) + 
-            this.config.amountRange.min;
+    async getRandomAmount(wallet, isBuy) {
+        try {
+            // Get current token balances
+            const [usdtBalance, mxtkBalance, ethBalance] = await Promise.all([
+                this.usdtContract.balanceOf(wallet.address),
+                this.mxtkContract.balanceOf(wallet.address),
+                this.provider.getBalance(wallet.address)
+            ]);
+
+            // Get decimals if not already cached
+            if (!this.mxtkDecimals) this.mxtkDecimals = await this.mxtkContract.decimals();
+            if (!this.usdtDecimals) this.usdtDecimals = await this.usdtContract.decimals();
+            
+            // Convert to human readable format with full precision
+            const usdtBalanceFormatted = parseFloat(ethers.utils.formatUnits(usdtBalance, this.usdtDecimals));
+            const mxtkBalanceFormatted = parseFloat(ethers.utils.formatUnits(mxtkBalance, this.mxtkDecimals));
+            const ethBalanceFormatted = parseFloat(ethers.utils.formatEther(ethBalance));
+            
+            // Log balances before amount calculation
+            console.log('\n=== Pre-Trade Balance Check ===');
+            console.log(`Wallet: ${wallet.address}`);
+            console.log(`ETH Balance: ${ethBalanceFormatted.toFixed(6)} ETH`);
+            console.log(`USDT Balance: ${usdtBalanceFormatted.toFixed(6)} USDT`);
+            console.log(`MXTK Balance: ${mxtkBalanceFormatted.toFixed(18)} MXTK`); // Use full precision for MXTK
+            console.log(`Trade Direction: ${isBuy ? 'USDT → MXTK' : 'MXTK → USDT'}`);
+            console.log('============================\n');
+
+            // Check if ETH balance is sufficient for gas
+            if (ethBalanceFormatted < this.config.lowBalanceThreshold) {
+                console.log(`⚠️ Insufficient ETH for gas. Have: ${ethBalanceFormatted} ETH, Need: ${this.config.lowBalanceThreshold} ETH`);
+                return null;
+            }
+
+            if (isBuy) {
+                // For USDT → MXTK trades (6 decimals precision)
+                const maxPossibleAmount = Math.min(
+                    usdtBalanceFormatted,
+                    parseFloat(process.env.MAX_USDT_TRADE) || 1.0
+                );
+
+                if (maxPossibleAmount < (parseFloat(process.env.MIN_USDT_TRADE) || 0.01)) {
+                    console.log(`⚠️ Insufficient USDT balance for minimum trade.`);
+                    console.log(`Have: ${usdtBalanceFormatted} USDT`);
+                    console.log(`Need: ${parseFloat(process.env.MIN_USDT_TRADE) || 0.01} USDT`);
+                    return null;
+                }
+
+                const amount = Math.random() * 
+                    (maxPossibleAmount - (parseFloat(process.env.MIN_USDT_TRADE) || 0.01)) + 
+                    (parseFloat(process.env.MIN_USDT_TRADE) || 0.01);
+
+                const finalAmount = Number(amount.toFixed(6)); // USDT uses 6 decimals
+                console.log(`Selected USDT amount for buying MXTK: ${finalAmount} USDT`);
+                return finalAmount;
+
+            } else {
+                // For MXTK → USDT trades (18 decimals precision)
+                const minMxtkTrade = parseFloat(process.env.MIN_MXTK_TRADE) || 0.0001;
+                const maxMxtkTrade = parseFloat(process.env.MAX_MXTK_TRADE) || 0.002;
+
+                // Convert balance to string to preserve precision
+                const mxtkBalanceStr = ethers.utils.formatUnits(mxtkBalance, this.mxtkDecimals);
+                
+                if (parseFloat(mxtkBalanceStr) === 0) {
+                    console.log(`⚠️ No MXTK available for trade`);
+                    return null;
+                }
+
+                // Use entire MXTK balance for the swap if it's within range
+                const finalAmount = Math.min(
+                    parseFloat(mxtkBalanceStr),
+                    maxMxtkTrade
+                );
+
+                if (finalAmount < minMxtkTrade) {
+                    console.log(`⚠️ MXTK amount too small for trade`);
+                    console.log(`Have: ${mxtkBalanceStr} MXTK`);
+                    console.log(`Minimum required: ${minMxtkTrade} MXTK`);
+                    return null;
+                }
+
+                // Keep full precision for MXTK amounts
+                console.log(`Using MXTK amount for swap: ${finalAmount} MXTK`);
+                return finalAmount;
+            }
+
+        } catch (error) {
+            console.error('Error getting random amount:', error);
+            return null;
+        }
     }
 
     async createOrder(wallet, amount, isBuy) {
         try {
-            // Get token decimals
-            const mxtkDecimals = await this.mxtkContract.decimals();
-            const usdtDecimals = await this.usdtContract.decimals(); // Usually 6 for USDT
+            // Validate amount before proceeding
+            if (!amount || amount <= 0) {
+                console.log(`⚠️ Skipping trade: Invalid amount (${amount})`);
+                return null;
+            }
 
-            // Round the amount to the lower of the two decimals to ensure compatibility
-            const minDecimals = Math.min(mxtkDecimals, usdtDecimals);
-            const roundedAmount = Number(amount).toFixed(minDecimals);
+            console.log(`Creating ${isBuy ? 'USDT → MXTK' : 'MXTK → USDT'} order for ${amount} tokens`);
             
-            console.log(`Creating ${isBuy ? 'buy' : 'sell'} order for ${roundedAmount} tokens`);
-            console.log('Input amount:', amount);
-            console.log('Rounded amount:', roundedAmount);
-            console.log('MXTK decimals:', mxtkDecimals);
-            console.log('USDT decimals:', usdtDecimals);
+            // Check token balances and ETH for gas
+            const [usdtBalance, mxtkBalance, ethBalance] = await Promise.all([
+                this.usdtContract.balanceOf(wallet.address),
+                this.mxtkContract.balanceOf(wallet.address),
+                this.provider.getBalance(wallet.address)
+            ]);
+            
+            const usdtDecimals = await this.usdtContract.decimals();
+            const mxtkDecimals = await this.mxtkContract.decimals();
+            
+            // Convert balances to human readable format
+            const usdtBalanceFormatted = parseFloat(ethers.utils.formatUnits(usdtBalance, usdtDecimals));
+            const mxtkBalanceFormatted = parseFloat(ethers.utils.formatUnits(mxtkBalance, mxtkDecimals));
+            const ethBalanceFormatted = parseFloat(ethers.utils.formatEther(ethBalance));
+            
+            console.log(`Wallet ${wallet.address} balances:`, {
+                ETH: ethBalanceFormatted.toFixed(6),
+                USDT: usdtBalanceFormatted.toFixed(6),
+                MXTK: mxtkBalanceFormatted.toFixed(6)
+            });
 
-            // Declare variables outside try block
-            let mxtkAmount, usdtAmount;
+            // Enhanced ETH balance check with detailed logging
+            if (ethBalanceFormatted < this.config.lowBalanceThreshold) {
+                console.log(`⚠️ ETH balance too low for safe trading:`);
+                console.log(`Current ETH balance: ${ethBalanceFormatted}`);
+                console.log(`Required minimum: ${this.config.lowBalanceThreshold}`);
+                console.log(`Skipping trade to prevent failed transactions`);
+                
+                // Alert if ETH is very low
+                if (ethBalanceFormatted < 0.001) {
+                    await this.sendAlert(
+                        'Low ETH Balance',
+                        `Wallet ${wallet.address} has very low ETH: ${ethBalanceFormatted}. Please refill.`
+                    );
+                }
+                return null;
+            }
+
+            // Validate sufficient balance for the trade
+            if (isBuy) {  // USDT → MXTK
+                if (usdtBalanceFormatted < amount) {
+                    console.log(`Insufficient USDT balance. Have: ${usdtBalanceFormatted}, Need: ${amount}`);
+                    return null; // Skip this trade
+                }
+            } else {  // MXTK → USDT
+                if (mxtkBalanceFormatted < amount) {
+                    console.log(`⚠️ Insufficient MXTK balance. Have: ${mxtkBalanceFormatted}, Need: ${amount}`);
+                    return null; // Skip this trade
+                }
+            }
+            
+            // Convert amount to token units with proper decimals
+            const tokenAmount = ethers.utils.parseUnits(
+                amount.toString(),
+                isBuy ? this.usdtDecimals : this.mxtkDecimals
+            ).toString();
+            
+            // Set up the swap parameters
+            const params = {
+                tokenIn: isBuy ? this.USDT_ADDRESS : this.MXTK_ADDRESS,
+                tokenOut: isBuy ? this.MXTK_ADDRESS : this.USDT_ADDRESS,
+                fee: this.UNISWAP_POOL_FEE,
+                recipient: wallet.address,
+                deadline: Math.floor(Date.now() / 1000) + 300,
+                amountIn: tokenAmount,
+                amountOutMinimum: 0,
+                sqrtPriceLimitX96: 0
+            };
+
+            // Log the exact amounts being used
+            console.log('\nTransaction Details:');
+            console.log(`Token In: ${params.tokenIn}`);
+            console.log(`Token Out: ${params.tokenOut}`);
+            console.log(`Amount In (human readable): ${amount}`);
+            console.log(`Amount In (wei): ${tokenAmount}`);
+            console.log(`Using decimals: ${isBuy ? this.usdtDecimals : this.mxtkDecimals}`);
 
             try {
-                // Parse amounts with correct decimals
-                mxtkAmount = ethers.utils.parseUnits(roundedAmount, mxtkDecimals);
-                usdtAmount = ethers.utils.parseUnits(roundedAmount, usdtDecimals);
-                
-                console.log('Parsed MXTK amount:', mxtkAmount.toString());
-                console.log('Parsed USDT amount:', usdtAmount.toString());
-            } catch (parseError) {
-                console.error('Error parsing amounts:', parseError);
-                console.log('Problematic values:', {
-                    amount,
-                    roundedAmount,
-                    mxtkDecimals,
-                    usdtDecimals
-                });
-                throw parseError;
-            }
+                // Get current gas price and add safety margin
+                const feeData = await this.provider.getFeeData();
+                const maxFeePerGas = feeData.maxFeePerGas.mul(120).div(100); // 20% safety margin
+                const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas.mul(120).div(100);
 
-            // Connect contracts with wallet signer
-            const mxtkWithSigner = this.mxtkContract.connect(wallet);
-            const usdtWithSigner = this.usdtContract.connect(wallet);
-            const routerWithSigner = this.routerContract.connect(wallet);
-
-            // Check if approvals are needed
-            const mxtkAllowance = await mxtkWithSigner.allowance(wallet.address, this.UNISWAP_V3_ROUTER);
-            const usdtAllowance = await usdtWithSigner.allowance(wallet.address, this.UNISWAP_V3_ROUTER);
-
-            // Approve MXTK if needed
-            if (mxtkAllowance.lt(mxtkAmount)) {
-                console.log('Approving MXTK...');
-                const mxtkTx = await mxtkWithSigner.approve(
-                    this.UNISWAP_V3_ROUTER,
-                    mxtkAmount
+                // First try to estimate gas
+                const gasEstimate = await this.routerContract.estimateGas.exactInputSingle(
+                    params,
+                    { 
+                        from: wallet.address,
+                        maxFeePerGas,
+                        maxPriorityFeePerGas
+                    }
                 );
-                await mxtkTx.wait();
-                console.log('✅ MXTK approved');
-            }
 
-            // Approve USDT if needed
-            if (usdtAllowance.lt(usdtAmount)) {
-                console.log('Approving USDT...');
-                const usdtTx = await usdtWithSigner.approve(
-                    this.UNISWAP_V3_ROUTER,
-                    usdtAmount
+                // Add 50% safety margin to gas estimate for Arbitrum
+                const safeGasLimit = gasEstimate.mul(150).div(100);
+
+                console.log('Transaction parameters:');
+                console.log(`Gas limit: ${safeGasLimit.toString()}`);
+                console.log(`Max fee per gas: ${ethers.utils.formatUnits(maxFeePerGas, 'gwei')} gwei`);
+                console.log(`Max priority fee: ${ethers.utils.formatUnits(maxPriorityFeePerGas, 'gwei')} gwei`);
+
+                // Calculate total maximum gas cost
+                const maxGasCost = maxFeePerGas.mul(safeGasLimit);
+                const maxGasCostInEth = ethers.utils.formatEther(maxGasCost);
+                console.log(`Maximum gas cost: ${maxGasCostInEth} ETH`);
+
+                // Check if we have enough ETH for gas with 20% buffer
+                const requiredEth = parseFloat(maxGasCostInEth) * 1.2;
+                if (ethBalanceFormatted < requiredEth) {
+                    console.log(`⚠️ Insufficient ETH for safe transaction:`);
+                    console.log(`Required (with buffer): ${requiredEth} ETH`);
+                    console.log(`Available: ${ethBalanceFormatted} ETH`);
+                    return null;
+                }
+
+                // Execute the trade with optimized parameters
+                const routerWithSigner = this.routerContract.connect(wallet);
+                const tx = await routerWithSigner.exactInputSingle(
+                    params,
+                    {
+                        gasLimit: safeGasLimit,
+                        maxFeePerGas,
+                        maxPriorityFeePerGas,
+                        type: 2 // EIP-1559 transaction
+                    }
                 );
-                await usdtTx.wait();
-                console.log('✅ USDT approved');
+
+                console.log(`Transaction sent: ${tx.hash}`);
+                const receipt = await tx.wait();
+                console.log(`✅ Trade executed: ${receipt.transactionHash}`);
+                console.log(`Gas used: ${receipt.gasUsed.toString()}`);
+                return receipt;
+
+            } catch (error) {
+                if (error.code === 'UNPREDICTABLE_GAS_LIMIT' || error.code === 'INSUFFICIENT_FUNDS') {
+                    console.log('⚠️ Transaction failed with error:');
+                    console.log(error.reason || error.message);
+                    if (error.error?.error?.message) {
+                        console.log('Network error message:', error.error.error.message);
+                    }
+                    
+                    // Log transaction parameters for debugging
+                    console.log('\nDebug information:');
+                    console.log('Token In:', params.tokenIn);
+                    console.log('Token Out:', params.tokenOut);
+                    console.log('Amount:', ethers.utils.formatUnits(params.amountIn, isBuy ? this.usdtDecimals : this.mxtkDecimals));
+                    console.log('Wallet ETH Balance:', ethBalanceFormatted);
+                    return null;
+                }
+                throw error;
             }
 
-            // Now create the order with the connected wallet
-            const router = routerWithSigner;
-            
-            // Rest of your order creation logic...
-            
         } catch (error) {
-            console.error('Error creating order:', error);
-            console.log('Full error details:', {
-                message: error.message,
-                code: error.code,
-                fault: error.fault,
-                operation: error.operation
-            });
+            console.error('Error executing trade:', error);
             await this.handleError(error);
             throw error;
         }
@@ -618,7 +841,7 @@ class MXTKMarketMaker {
         }
     }
 
-    async distributeInitialEth() {
+    async distributeInitialFunds() {
         try {
             console.log('\n=== Master Wallet Status (Arbitrum) ===');
             
@@ -629,83 +852,107 @@ class MXTKMarketMaker {
             );
             console.log('Master wallet address:', masterWallet.address);
 
-            // Check master wallet balance
-            const masterBalance = await this.provider.getBalance(masterWallet.address);
-            const masterBalanceEth = ethers.utils.formatEther(masterBalance);
-            console.log('Current Arbitrum balance:', masterBalanceEth, 'ETH');
+            // Check master wallet balances
+            const masterEthBalance = await this.provider.getBalance(masterWallet.address);
+            const masterUsdtBalance = await this.usdtContract.balanceOf(masterWallet.address);
+            const usdtDecimals = await this.usdtContract.decimals();
+            
+            const masterEthBalanceFormatted = ethers.utils.formatEther(masterEthBalance);
+            const masterUsdtBalanceFormatted = ethers.utils.formatUnits(masterUsdtBalance, usdtDecimals);
+            
+            console.log('Master Wallet Balances:');
+            console.log(`ETH: ${masterEthBalanceFormatted} ETH`);
+            console.log(`USDT: ${masterUsdtBalanceFormatted} USDT`);
 
-            // Calculate required balance for distribution
+            // Calculate required balances
             const requiredEthPerWallet = 0.001; // 0.001 ETH per wallet
+            const requiredUsdtPerWallet = 1; // 1 USDT per wallet
             const totalWallets = this.state.wallets.length;
             const totalRequiredEth = requiredEthPerWallet * totalWallets;
-            console.log('Required balance:', totalRequiredEth, 'ETH');
+            const totalRequiredUsdt = requiredUsdtPerWallet * totalWallets;
 
-            // Check if master wallet has sufficient funds
-            if (parseFloat(masterBalanceEth) < totalRequiredEth) {
-                const shortfall = totalRequiredEth - parseFloat(masterBalanceEth);
-                console.log('\n⚠️ Insufficient Funds Warning:');
-                console.log('----------------------------------------');
-                console.log(`Current Balance: ${masterBalanceEth} ETH`);
-                console.log(`Required Balance: ${totalRequiredEth} ETH`);
-                console.log(`Shortfall: ${shortfall.toFixed(4)} ETH`);
-                console.log(`Number of Wallets: ${totalWallets}`);
-                console.log('----------------------------------------');
-                console.log('Please send the required ETH to the master wallet address above.');
-                console.log('The bot will not be able to operate without sufficient funds.');
-                console.log('----------------------------------------\n');
-
-                // Send alert email if configured
-                const alertMessage = `
-                    Insufficient funds detected in master wallet on Arbitrum
-                    
-                    Master Wallet: ${masterWallet.address}
-                    Current Balance: ${masterBalanceEth} ETH
-                    Required Balance: ${totalRequiredEth} ETH
-                    Shortfall: ${shortfall.toFixed(4)} ETH
-                    
-                    Please add funds to continue operation.
-                `;
-                await this.sendAlert('Low Balance Alert', alertMessage);
-
-                throw new Error('INSUFFICIENT_FUNDS');
+            // Validate master wallet has sufficient funds
+            if (parseFloat(masterEthBalanceFormatted) < totalRequiredEth) {
+                throw new Error(`Insufficient ETH in master wallet. Need: ${totalRequiredEth} ETH, Have: ${masterEthBalanceFormatted} ETH`);
+            }
+            
+            if (parseFloat(masterUsdtBalanceFormatted) < totalRequiredUsdt) {
+                throw new Error(`Insufficient USDT in master wallet. Need: ${totalRequiredUsdt} USDT, Have: ${masterUsdtBalanceFormatted} USDT`);
             }
 
-            // Distribute ETH to trading wallets
-            console.log('\n=== Distributing ETH to Trading Wallets ===');
+            // First approve USDT spending
+            console.log('\n=== Approving USDT transfers ===');
+            const usdtWithSigner = this.usdtContract.connect(masterWallet);
+
+            // Distribute funds to trading wallets
+            console.log('\n=== Distributing Funds to Trading Wallets ===');
             for (const wallet of this.state.wallets) {
-                const balance = await this.provider.getBalance(wallet.address);
-                const balanceEth = ethers.utils.formatEther(balance);
+                console.log(`\nProcessing wallet: ${wallet.address}`);
                 
-                if (parseFloat(balanceEth) < requiredEthPerWallet) {
-                    const amountToSend = ethers.utils.parseEther(
-                        (requiredEthPerWallet - parseFloat(balanceEth)).toFixed(6)
+                // Check current balances
+                const ethBalance = await this.provider.getBalance(wallet.address);
+                const usdtBalance = await this.usdtContract.balanceOf(wallet.address);
+                
+                const ethBalanceFormatted = ethers.utils.formatEther(ethBalance);
+                const usdtBalanceFormatted = ethers.utils.formatUnits(usdtBalance, usdtDecimals);
+                
+                console.log('Current balances:');
+                console.log(`ETH: ${ethBalanceFormatted} ETH`);
+                console.log(`USDT: ${usdtBalanceFormatted} USDT`);
+
+                // Send ETH if needed
+                if (parseFloat(ethBalanceFormatted) < requiredEthPerWallet) {
+                    const ethToSend = ethers.utils.parseEther(
+                        (requiredEthPerWallet - parseFloat(ethBalanceFormatted)).toFixed(18)
                     );
                     
-                    console.log(`Sending ${ethers.utils.formatEther(amountToSend)} ETH to ${wallet.address}`);
+                    console.log(`Sending ${ethers.utils.formatEther(ethToSend)} ETH...`);
                     
-                    const tx = await masterWallet.sendTransaction({
+                    const ethTx = await masterWallet.sendTransaction({
                         to: wallet.address,
-                        value: amountToSend,
+                        value: ethToSend,
                         gasLimit: this.config.gasLimit
                     });
                     
-                    await tx.wait();
-                    console.log('✅ Transfer complete');
-                } else {
-                    console.log(`Wallet ${wallet.address} already has sufficient funds (${balanceEth} ETH)`);
+                    await ethTx.wait();
+                    console.log('✅ ETH transfer complete');
                 }
+
+                // Send USDT if needed
+                if (parseFloat(usdtBalanceFormatted) < requiredUsdtPerWallet) {
+                    const usdtToSend = ethers.utils.parseUnits(
+                        (requiredUsdtPerWallet - parseFloat(usdtBalanceFormatted)).toFixed(6),
+                        usdtDecimals
+                    );
+                    
+                    console.log(`Sending ${ethers.utils.formatUnits(usdtToSend, usdtDecimals)} USDT...`);
+                    
+                    // Use the signer-connected contract for transfer
+                    const usdtTx = await usdtWithSigner.transfer(
+                        wallet.address,
+                        usdtToSend,
+                        { gasLimit: this.config.gasLimit }
+                    );
+                    
+                    await usdtTx.wait();
+                    console.log('✅ USDT transfer complete');
+                }
+
+                // Verify final balances
+                const finalEthBalance = await this.provider.getBalance(wallet.address);
+                const finalUsdtBalance = await this.usdtContract.balanceOf(wallet.address);
+                
+                console.log('\nFinal balances:');
+                console.log(`ETH: ${ethers.utils.formatEther(finalEthBalance)} ETH`);
+                console.log(`USDT: ${ethers.utils.formatUnits(finalUsdtBalance, usdtDecimals)} USDT`);
             }
             
-            console.log('\n✅ ETH distribution completed successfully\n');
+            console.log('\n✅ Fund distribution completed successfully\n');
 
         } catch (error) {
-            if (error.message === 'INSUFFICIENT_FUNDS') {
-                // We've already displayed the detailed message, just exit gracefully
-                process.exit(1);
-            } else {
-                console.error('Error during ETH distribution:', error);
-                throw error;
-            }
+            console.error('Error during fund distribution:', error);
+            await this.handleError(error);
+            throw error;
         }
     }
 
@@ -785,27 +1032,21 @@ class MXTKMarketMaker {
             await this.walletManager.loadWallets();
             const existingWallets = this.walletManager.getAllWallets();
             
-            // Log all wallet addresses clearly
-            console.log('\n=== Wallet Addresses ===');
-            existingWallets.forEach((wallet, index) => {
-                console.log(`Wallet ${index + 1}: ${wallet.address}`);
-            });
-            console.log('=====================\n');
-            
+            // Create additional wallets if needed to reach 3 total
             if (existingWallets.length < 3) {
                 const walletsToCreate = 3 - existingWallets.length;
                 for (let i = 0; i < walletsToCreate; i++) {
                     await this.walletManager.createWallet();
                 }
             }
-
+            
             // Connect wallets to provider
             this.state.wallets = this.walletManager.getAllWallets().map(
                 wallet => wallet.connect(this.provider)
             );
 
-            // Distribute initial ETH if needed
-            await this.distributeInitialEth();
+            // Distribute initial ETH and USDT
+            await this.distributeInitialFunds();
 
             // Check and display final balances
             await this.displayWalletBalances();
@@ -845,94 +1086,56 @@ class MXTKMarketMaker {
 
     async approveTokens(wallet) {
         try {
-            console.log(`\nApproving tokens for wallet: ${wallet.address}`);
+            const MAX_UINT256 = ethers.constants.MaxUint256;
             
-            // Check wallet balance first
-            const balance = await this.provider.getBalance(wallet.address);
-            console.log(`Wallet ETH balance: ${ethers.utils.formatEther(balance)} ETH`);
-            
-            // Lower the minimum balance requirement to 0.0002 ETH
-            if (balance.lt(ethers.utils.parseEther('0.0002'))) {
-                const currentBalance = ethers.utils.formatEther(balance);
-                console.log('\n⚠️ Low Balance Warning:');
-                console.log('----------------------------------------');
-                console.log(`Current Balance: ${currentBalance} ETH`);
-                console.log(`Minimum Required: 0.0002 ETH`);
-                console.log('----------------------------------------');
-                throw new Error('Insufficient ETH balance for approvals');
+            // Connect contracts to wallet for signing
+            const mxtkWithSigner = this.mxtkContract.connect(wallet);
+            const usdtWithSigner = this.usdtContract.connect(wallet);
+
+            console.log(`Checking approvals for wallet ${wallet.address}...`);
+
+            // Check current MXTK allowance
+            const mxtkAllowance = await this.mxtkContract.allowance(
+                wallet.address,
+                this.UNISWAP_V3_ROUTER
+            );
+
+            // Check current USDT allowance
+            const usdtAllowance = await this.usdtContract.allowance(
+                wallet.address,
+                this.UNISWAP_V3_ROUTER
+            );
+
+            // Approve MXTK if needed
+            if (mxtkAllowance.eq(0)) {
+                console.log('Approving MXTK...');
+                const mxtkApproveTx = await mxtkWithSigner.approve(
+                    this.UNISWAP_V3_ROUTER,
+                    MAX_UINT256,
+                    { gasLimit: 100000 }
+                );
+                await mxtkApproveTx.wait();
+                console.log('✅ MXTK approved');
+            } else {
+                console.log('MXTK already approved');
             }
 
-            // Get current base fee and priority fee
-            const [baseFee, priorityFee] = await Promise.all([
-                this.provider.getBlock('latest').then(block => block.baseFeePerGas),
-                this.provider.getGasPrice().then(price => price.div(10)) // Use 10% of current gas price as priority fee
-            ]);
-
-            // Calculate max fee per gas (base fee + priority fee + 20% buffer)
-            const maxFeePerGas = baseFee.mul(120).div(100).add(priorityFee);
-            const maxPriorityFeePerGas = priorityFee;
-
-            console.log(`Current base fee: ${ethers.utils.formatUnits(baseFee, 'gwei')} gwei`);
-            console.log(`Max fee per gas: ${ethers.utils.formatUnits(maxFeePerGas, 'gwei')} gwei`);
-
-            const overrides = {
-                maxFeePerGas,
-                maxPriorityFeePerGas,
-                gasLimit: this.config.gasLimit,
-                nonce: await this.provider.getTransactionCount(wallet.address)
-            };
-
-            // First approve MXTK
-            console.log('Approving MXTK...');
-            const mxtkContract = this.mxtkContract.connect(wallet);
-            
-            // First set approval to 0
-            console.log('Resetting MXTK approval...');
-            const resetTx = await mxtkContract.approve(
-                this.UNISWAP_V3_ROUTER,
-                0,
-                { ...overrides }
-            );
-            await resetTx.wait();
-            console.log('✅ MXTK approval reset');
-
-            // Increment nonce for next transaction
-            overrides.nonce++;
-
-            // Then set to max value
-            const mxtkTx = await mxtkContract.approve(
-                this.UNISWAP_V3_ROUTER,
-                ethers.constants.MaxUint256,
-                { ...overrides }
-            );
-            await mxtkTx.wait();
-            console.log('✅ MXTK approved');
-
-            // Then handle USDT
-            console.log('Approving USDT...');
-            const usdtContract = new ethers.Contract(
-                this.USDT_ADDRESS,
-                [
-                    'function approve(address spender, uint256 amount) public returns (bool)',
-                    'function decimals() public view returns (uint8)'
-                ],
-                wallet
-            );
-
-            // Increment nonce for USDT approval
-            overrides.nonce++;
-
-            const usdtTx = await usdtContract.approve(
-                this.UNISWAP_V3_ROUTER,
-                ethers.constants.MaxUint256,
-                { ...overrides }
-            );
-            await usdtTx.wait();
-            console.log('✅ USDT approved');
+            // Approve USDT if needed
+            if (usdtAllowance.eq(0)) {
+                console.log('Approving USDT...');
+                const usdtApproveTx = await usdtWithSigner.approve(
+                    this.UNISWAP_V3_ROUTER,
+                    MAX_UINT256,
+                    { gasLimit: 100000 }
+                );
+                await usdtApproveTx.wait();
+                console.log('✅ USDT approved');
+            } else {
+                console.log('USDT already approved');
+            }
 
         } catch (error) {
-            console.error('Error in approveTokens:', error);
-            await this.handleError(error);
+            console.error('Error approving tokens:', error);
             throw error;
         }
     }
@@ -952,37 +1155,50 @@ class MXTKMarketMaker {
             // Start the main trading loop
             this.isRunning = true;
             
-            // Set up interval for continuous trading
-            this.processInterval = setInterval(async () => {
-                if (!this._isUpdating && !this.state.isCircuitBroken) {
-                    try {
-                        // Get random wallet from pool
-                        const wallet = this.state.wallets[Math.floor(Math.random() * this.state.wallets.length)];
-                        
-                        // Randomly decide buy or sell
-                        const isBuy = Math.random() > 0.5;
-                        
-                        // Get random amount within configured range
-                        const amount = this.getRandomAmount();
-                        
-                        // Create the order
-                        await this.createOrder(wallet, amount, isBuy);
-                        
-                        // Random delay before next trade
-                        const delay = this.getRandomDelay();
-                        console.log(`Next trade in ${delay} seconds`);
-                        
-                    } catch (error) {
-                        console.error('Error in trading cycle:', error);
-                        await this.handleError(error);
-                    }
-                }
-            }, this.config.timeRange.min * 1000);
+            // Initial trade execution
+            this.executeTradeLoop();
 
-            console.log('Process manager started successfully');
         } catch (error) {
             console.error('Error starting process manager:', error);
             throw error;
+        }
+    }
+
+    async executeTradeLoop() {
+        while (this.isRunning) {
+            if (!this._isUpdating && !this.state.isCircuitBroken) {
+                try {
+                    // Get random wallet from pool
+                    const wallet = this.state.wallets[Math.floor(Math.random() * this.state.wallets.length)];
+                    
+                    // Determine trade direction
+                    let isBuy;
+                    if (!this.firstTradeExecuted) {
+                        isBuy = true;
+                        this.firstTradeExecuted = true;
+                        console.log('Executing first trade: USDT → MXTK');
+                    } else {
+                        isBuy = Math.random() > 0.5;
+                    }
+                    
+                    // Get random amount within configured range and check balance
+                    const amount = await this.getRandomAmount(wallet, isBuy);
+                    
+                    // Only proceed if we have a valid amount
+                    if (amount !== null) {
+                        await this.createOrder(wallet, amount, isBuy);
+                    }
+                    
+                    // Random delay before next trade
+                    const delay = this.getRandomDelay();
+                    console.log(`Next trade in ${delay/1000} seconds`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    
+                } catch (error) {
+                    console.error('Error in trading cycle:', error);
+                    await this.handleError(error);
+                }
+            }
         }
     }
 }

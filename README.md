@@ -1,163 +1,142 @@
 # MXTK Market Maker Bot
 
-A professional market making bot designed for the MXTK token on Arbitrum, using Uniswap V3 for trading. The bot maintains a balanced order book with multiple standing orders, implements safety features like circuit breakers, and includes monitoring and alert systems.
+A professional market making bot designed for the MXTK token on Arbitrum, using Uniswap V3 for trading. The bot implements safety features like circuit breakers, gas optimization, and includes monitoring and alert systems.
 
-## Features
+## Current Features
 
-- **Advanced Order Book Management**:
-  - Maintains 10 orders on each side (10 buy/10 sell)
-  - Total spread maintained under 2%
-  - Even spacing between orders (0.1% minimum)
-  - Automatic order rebalancing based on price movements
+- **Trading Strategy**:
+  - Alternates between USDT → MXTK and MXTK → USDT trades
+  - First trade is always USDT → MXTK
+  - Random trade amounts within configured ranges
+  - Configurable delays between trades (10-120 seconds)
 
-- **Natural Trading Patterns**:
-  - Random wallet selection for trade distribution
-  - Randomized order amounts (±20% of base amount)
-  - Dynamic order placement and adjustment
-  - Automatic price tracking and adjustment
+- **Token Management**:
+  - MXTK (18 decimals) and USDT (6 decimals) support
+  - Automatic token approvals for Uniswap V3
+  - Balance monitoring and validation
+  - Minimum trade size enforcement
 
-- **Advanced Trading Features**:
-  - Uniswap V3 integration with 0.3% fee tier
-  - Dynamic spread adjustment based on volatility
-  - Gas optimization with EIP-1559 support
-  - Configurable trade amount ranges
-  
 - **Multi-Wallet Management**:
-  - Secure creation and management of trading wallets
-  - Random wallet selection for order placement
-  - Balance monitoring across all wallets
-  
+  - Maintains 3 trading wallets
+  - Random wallet selection for trades
+  - Automatic ETH and token distribution
+  - Balance monitoring across wallets
+
 - **Safety Mechanisms**:
   - Circuit breaker (10% price movement threshold)
-  - Daily volume limits (1 MXTK per 24 hours)
-  - Dynamic spread adjustment (0.1% - 2% range)
-  - Comprehensive error handling and recovery
+  - Daily volume limits
+  - Low ETH balance checks (0.0002 ETH minimum)
+  - Comprehensive error handling
 
 - **Gas Optimization**:
   - EIP-1559 gas fee model support
-  - Maximum gas price of 500 GWEI
-  - Gas limit of 500,000 for Arbitrum
-  - Transaction optimization
+  - Dynamic gas estimation with safety margins
+  - Configurable gas limits and prices
+  - Transaction parameter optimization
 
-- **Monitoring & Alerts**:
+- **Monitoring & Logging**:
+  - Detailed transaction logging to files
+  - Daily log rotation
   - Email notifications for critical events
-  - Low balance alerts (0.1 ETH threshold)
-  - Volume alerts (80% of daily limit)
-  - Trading pattern analytics
+  - Balance and trade monitoring
 
-## Prerequisites
+## Trading Parameters
 
-- Node.js (v14 or higher)
-- npm or yarn
-- Access to Arbitrum network
-- Email account for alerts (SMTP access)
+- **USDT Trading Range**:
+  - Minimum: 0.01 USDT
+  - Maximum: 1.0 USDT
 
-## Installation
+- **MXTK Trading Range**:
+  - Minimum: 0.0001 MXTK
+  - Maximum: 0.002 MXTK
 
-1. Clone the repository:
+- **Time Delays**:
+  - Minimum: 10 seconds
+  - Maximum: 120 seconds
 
-```bash
-git clone [repository-url]
-cd mxtk-market-maker
-```
+- **ETH Requirements**:
+  - Minimum per wallet: 0.0002 ETH
+  - Gas safety margin: 50%
+  - Priority fee adjustment: 20%
 
-2.Install dependencies:
+## Configuration
 
-```bash
-npm install
-```
-
-3.Configure Environment Variables:
-Create a `.env` file in the root directory with the following configuration:
+Create a `.env` file with the following required parameters:
 
 ```env
 # Network Configuration
+ARBITRUM_MAINNET_RPC=https://arb1.arbitrum.io/rpc
+
+# Network Configuration
 NETWORK=mainnet
+MORALIS_API_KEY=your_moralis_api_key
 ARBITRUM_MAINNET_RPC=https://arb1.arbitrum.io/rpc
 ARBITRUM_TESTNET_RPC=https://sepolia-rollup.arbitrum.io/rpc
 
-# Uniswap V3 Configuration
-UNISWAP_V3_ROUTER=0xE592427A0AEce92De3Edee1F18E0157C05861564    # V3 SwapRouter
-UNISWAP_V3_FACTORY=0x1F98431c8aD98523631AE4a59f267346ea31F984   # V3 Factory
-UNISWAP_V3_QUOTER=0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6    # V3 Quoter
-UNISWAP_POOL_FEE=3000                                           # 0.3% fee tier
-
-# Token Addresses (Arbitrum Mainnet)
-MXTK_ADDRESS=0x3e4Ffeb394B371AAaa0998488046Ca19d870d9Ba        # MXTK token address
-USDT_ADDRESS=0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9        # USDT on Arbitrum
-
-# Order Book Configuration
-MIN_SPREAD=0.001                         # Minimum spacing between orders (0.1%)
-TARGET_SPREAD=0.01                       # Target total spread (1%)
-MAX_SPREAD=0.02                          # Maximum total spread (2%)
-BASE_ORDER_AMOUNT=0.01                   # Base amount for each order
-ORDER_AMOUNT_VARIANCE=0.2                # Order amount randomization (±20%)
-
 # Trading Parameters
-MAX_DAILY_VOLUME=1                       # Maximum trading volume per 24 hours
-CIRCUIT_BREAKER_THRESHOLD=0.1            # 10% price movement triggers halt
-LOW_BALANCE_THRESHOLD=0.1                # ETH balance warning threshold
-VOLUME_ALERT_THRESHOLD=0.8               # Alert at 80% of max daily volume
+MAX_DAILY_VOLUME=1
+CIRCUIT_BREAKER_THRESHOLD=0.1
+LOW_BALANCE_THRESHOLD=0.0002
+VOLUME_ALERT_THRESHOLD=0.8
+
+# Trading Ranges
+MIN_TIME_DELAY=10
+MAX_TIME_DELAY=120
+
+# Spread Configuration  
+MIN_SPREAD=0.01
+TARGET_SPREAD=0.015
+MAX_SPREAD=0.02
 
 # Gas Configuration
-MAX_GAS_PRICE=500                        # Maximum gas price in GWEI
-GAS_LIMIT=500000                         # Gas limit for Arbitrum
+MAX_GAS_PRICE=500
+GAS_LIMIT=500000
 
 # SMTP Configuration
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your_email@gmail.com
-SMTP_PASS=your_smtp_password
-
-# Alert Configuration
+SMTP_PASS=your_password
 ALERT_FROM_EMAIL=your_email@gmail.com
 ALERT_TO_EMAIL=your_email@gmail.com
 
-# Master Wallet Configuration
-MASTER_WALLET_PRIVATE_KEY=your_master_wallet_private_key
+# Wallet Configuration
+MASTER_WALLET_PRIVATE_KEY=your_private_key
+REQUIRED_ETH_PER_WALLET=0.0002
+
+# Uniswap V3 Configuration
+UNISWAP_V3_ROUTER=0xE592427A0AEce92De3Edee1F18E0157C05861564
+UNISWAP_V3_FACTORY=0x1F98431c8aD98523631AE4a59f267346ea31F984
+UNISWAP_V3_QUOTER=0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6
+UNISWAP_POOL_FEE=3000
+
+# Token Addresses
+MXTK_ADDRESS=0x3e4Ffeb394B371AAaa0998488046Ca19d870d9Ba
+USDT_ADDRESS=0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9
+
+# Slippage Settings
+MAX_SLIPPAGE=0.02
+
+# USDT Trading Ranges
+MIN_USDT_TRADE=0.01
+MAX_USDT_TRADE=1.0
+
+# MXTK Trading Ranges  
+MIN_MXTK_TRADE=0.0001
+MAX_MXTK_TRADE=0.002
 ```
 
-## Configuration Details
+## Important Notes
 
-### Network Settings
-
-- Supports both Arbitrum mainnet and testnet
-- Configurable RPC endpoints for both networks
-
-### Order Book Parameters
-
-- Minimum order spacing: 0.1% (0.001)
-- Target spread: 1% (0.01)
-- Maximum spread: 2% (0.02)
-- Base order size: 0.01 MXTK
-- Order size variance: ±20%
-
-### Trading Limits
-
-- Maximum daily volume: 1 MXTK
-- Circuit breaker threshold: 10% price movement
-- Volume alert threshold: 80% of daily limit
-- Minimum ETH balance: 0.1 ETH
-
-### Gas Optimization
-
-- Maximum gas price: 500 GWEI
-- Gas limit: 500,000 units
-- EIP-1559 compatible fee calculation
-
-### Alert System
-
-- SMTP-based email alerts
-- Configurable alert thresholds
-- Critical event notifications
-- Balance and volume monitoring
+1. The bot maintains detailed logs in the `logs` directory
+2. Each wallet requires a minimum of 0.0002 ETH for gas
+3. Token approvals are checked and renewed automatically
+4. Failed transactions are logged with detailed error information
+5. Gas estimation includes safety margins for Arbitrum network
 
 ## Security Considerations
 
-1. Keep your `.env` file secure and never commit it to version control
-2. Use a dedicated email for alerts
-3. Secure your master wallet private key
-4. Regularly monitor wallet balances and trading patterns
-5. Test thoroughly on testnet before deploying to mainnet
-
-Would you like me to explain any specific configuration in more detail?
+1. Keep your `.env` file secure
+2. Monitor wallet balances regularly
+3. Check logs for any unusual patterns
+4. Test thoroughly before deploying to mainnet

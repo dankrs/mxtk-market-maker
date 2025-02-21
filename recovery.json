@@ -1,8 +1,18 @@
 {
-  "dailyVolume": 0,
+  "dailyVolume": 40.275819,
   "lastPrice": null,
   "isCircuitBroken": false,
   "lastPriceUpdate": 1739582342049,
   "recoveryAttempts": 3,
-  "wallets": []
+  "wallets": [
+    {
+      "address": "0x1CB4F578F9f73f6C01E2FC386a3B1C908E6D097A"
+    },
+    {
+      "address": "0x2Ce8c719004fa83cBF22D589BEb669B704D7A092"
+    },
+    {
+      "address": "0xFD665261f36f440d026B5a7404a8cc3ee7664952"
+    }
+  ]
 }
