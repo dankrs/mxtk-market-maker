@@ -22,6 +22,8 @@ services:
         value: aiupd25@gmail.com
       - key: ALERT_TO_EMAIL
         value: aiupd25@gmail.com
+      - key: REQUIRED_ETH_PER_WALLET
+        value: "0.0002"
     disk:
       - name: logs
         mountPath: /app/logs

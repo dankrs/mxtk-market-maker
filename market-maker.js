@@ -870,9 +870,14 @@ class MXTKMarketMaker {
             // Calculate minimum required ETH with a small safety margin
             const requiredEthPerWallet = this.config.requiredEthPerWallet;
             const safetyMargin = 1.2; // 20% safety margin
+            const totalWallets = this.state.wallets.length;
             const requiredEth = ethers.utils.parseEther(
-                (this.state.wallets.length * requiredEthPerWallet * safetyMargin).toString()
+                (totalWallets * requiredEthPerWallet * safetyMargin).toString()
             );
+
+            console.log(`Required ETH per wallet: ${requiredEthPerWallet} ETH`);
+            console.log(`Total wallets: ${totalWallets}`);
+            console.log(`Total required ETH (with ${safetyMargin}x safety margin): ${ethers.utils.formatEther(requiredEth)} ETH`);
 
             const masterBalance = await this.provider.getBalance(this.masterWallet.address);
             
