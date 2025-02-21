@@ -1223,9 +1223,9 @@ Transaction (if any): ${JSON.stringify(error.transaction || {}, null, 2)}
             logger.info('Initializing provider...');
             
             // Initialize the provider with Arbitrum network
-            const providerUrl = process.env.ARBITRUM_RPC_URL;
+            const providerUrl = process.env.ARBITRUM_MAINNET_RPC;
             if (!providerUrl) {
-                throw new Error('ARBITRUM_RPC_URL not configured');
+                throw new Error('ARBITRUM_MAINNET_RPC not configured');
             }
 
             this.provider = new ethers.providers.JsonRpcProvider(providerUrl);
