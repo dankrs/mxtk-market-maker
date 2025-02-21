@@ -961,18 +961,31 @@ class MXTKMarketMaker {
                     
                     console.log(`Sending ${ethers.utils.formatUnits(usdtToSend, usdtDecimals)} USDT...`);
                     
+                    // Estimate gas for USDT transfer
+                    const usdtWithSigner = this.usdtContract.connect(this.masterWallet);
+                    const estimatedGas = await usdtWithSigner.estimateGas.transfer(
+                        wallet.address,
+                        usdtToSend
+                    );
+                    
+                    // Add 50% buffer to estimated gas
+                    const gasLimit = estimatedGas.mul(150).div(100);
+                    
+                    console.log(`Estimated gas: ${estimatedGas.toString()}, Using gas limit: ${gasLimit.toString()}`);
+                    
                     // Use the signer-connected contract for transfer
                     const usdtTx = await usdtWithSigner.transfer(
                         wallet.address,
                         usdtToSend,
                         {
-                            gasLimit: 100000, // Increased for Arbitrum
-                            maxFeePerGas: ethers.utils.parseUnits('5', 'gwei'),
+                            gasLimit: 300000, // Much higher gas limit for USDT transfers on Arbitrum
+                            maxFeePerGas: ethers.utils.parseUnits('10', 'gwei'), // Higher gas price
                             maxPriorityFeePerGas: ethers.utils.parseUnits('2', 'gwei'),
                             type: 2
                         }
                     );
                     
+                    console.log('Waiting for USDT transfer confirmation...');
                     await usdtTx.wait();
                     console.log('✅ USDT transfer complete');
                 }
