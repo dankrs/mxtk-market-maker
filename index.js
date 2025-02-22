@@ -1,3 +1,6 @@
+// Suppress punycode deprecation warning
+process.removeAllListeners('warning');
+
 // index.js
 require('dotenv').config();
 const express = require('express');
