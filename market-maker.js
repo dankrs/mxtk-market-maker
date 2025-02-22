@@ -393,27 +393,49 @@ class MXTKMarketMaker {
     }
 
     initializeWebSocket() {
-        // Setup WebSocket connection for real-time monitoring
-        this.provider.on('pending', async (txHash) => {
-            try {
-                const tx = await this.provider.getTransaction(txHash);
-                if (tx && tx.to === this.UNISWAP_V3_ROUTER) {
-                    console.log(`Monitoring pending transaction: ${txHash}`);
+        try {
+            // Setup WebSocket connection for real-time monitoring
+            this.provider.on('pending', async (txHash) => {
+                try {
+                    const tx = await this.provider.getTransaction(txHash);
+                    if (tx && tx.to === this.UNISWAP_V3_ROUTER) {
+                        console.log(`Monitoring pending transaction: ${txHash}`);
+                    }
+                } catch (error) {
+                    console.error('Error monitoring transaction:', error);
                 }
-            } catch (error) {
-                console.error('Error monitoring transaction:', error);
-            }
-        });
+            });
 
-        // Listen for new blocks
-        this.provider.on('block', async (blockNumber) => {
-            try {
-                const block = await this.provider.getBlock(blockNumber);
-                console.log(`New block: ${blockNumber}, Gas price: ${ethers.utils.formatUnits(block.gasPrice, 'gwei')} gwei`);
-            } catch (error) {
-                console.error('Error monitoring block:', error);
-            }
-        });
+            // Listen for new blocks with proper gas price handling
+            this.provider.on('block', async (blockNumber) => {
+                try {
+                    const block = await this.provider.getBlock(blockNumber);
+                    // Get current fee data instead of using block.gasPrice
+                    const feeData = await this.provider.getFeeData();
+                    
+                    console.log('New block:', {
+                        number: blockNumber,
+                        baseFeePerGas: feeData.lastBaseFeePerGas ? 
+                            ethers.utils.formatUnits(feeData.lastBaseFeePerGas, 'gwei') : 'N/A',
+                        maxFeePerGas: feeData.maxFeePerGas ?
+                            ethers.utils.formatUnits(feeData.maxFeePerGas, 'gwei') : 'N/A',
+                        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ?
+                            ethers.utils.formatUnits(feeData.maxPriorityFeePerGas, 'gwei') : 'N/A'
+                    });
+                } catch (error) {
+                    // Log error but don't let it crash the application
+                    console.error('Error monitoring block:', {
+                        blockNumber,
+                        error: error.message
+                    });
+                }
+            });
+
+            console.log('✅ WebSocket monitoring initialized');
+        } catch (error) {
+            console.error('Error initializing WebSocket:', error);
+            // Don't throw the error as WebSocket monitoring is not critical
+        }
     }
 
     setupLogging() {
