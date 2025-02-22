@@ -25,6 +25,12 @@ class MXTKMarketMaker {
         this.config = config;
         this.provider = new ethers.providers.JsonRpcProvider(process.env.ARBITRUM_MAINNET_RPC);
         
+        // Setup logging first
+        this.setupLogging();
+        
+        // Now we can use this.tradingLog
+        this.tradingLog('system', 'Initializing market maker...');
+        
         // Validate MXTK address case
         const correctMXTKAddress = "0x3e4Ffeb394B371AAaa0998488046Ca19d870d9Ba";
         if (process.env.MXTK_ADDRESS !== correctMXTKAddress) {
@@ -128,9 +134,6 @@ class MXTKMarketMaker {
         this.lastTradeDirection = null;
         this.isFirstTrade = true;
         
-        // Setup logging
-        this.setupLogging();
-
         // Initialize email transporter
         this.emailTransporter = nodemailer.createTransport({
             host: process.env.SMTP_HOST,
