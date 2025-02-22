@@ -1119,24 +1119,24 @@ class MXTKMarketMaker {
             // Get current fee data
             const feeData = await this.provider.getFeeData();
             
-            // For Arbitrum, we need to adjust the gas estimates
-            const gasLimit = estimatedGas.mul(110).div(100); // Reduce buffer to 10%
+            // For Arbitrum, use minimal gas adjustments
+            const gasLimit = estimatedGas.mul(105).div(100); // Reduce buffer to 5%
             const maxFeePerGas = feeData.maxFeePerGas || feeData.gasPrice;
             const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas || ethers.utils.parseUnits("0.1", "gwei");
 
             // Calculate costs for display only
             const maxGasCost = gasLimit.mul(maxFeePerGas);
-            // Reduce safety buffer to 5% for Arbitrum
-            const safetyBuffer = maxGasCost.mul(5).div(100);
+            // Reduce safety buffer to 2% for Arbitrum
+            const safetyBuffer = maxGasCost.mul(2).div(100);
             const totalRequired = maxGasCost.add(safetyBuffer);
 
             // Log detailed calculation
             console.log('\nDetailed Gas Calculation:');
             console.log('Base gas estimate:', estimatedGas.toString());
-            console.log('Adjusted gas limit (+10%):', gasLimit.toString());
+            console.log('Adjusted gas limit (+5%):', gasLimit.toString());
             console.log('Max fee per gas (wei):', maxFeePerGas.toString());
             console.log('Base cost (wei):', maxGasCost.toString());
-            console.log('Safety buffer (5%):', ethers.utils.formatEther(safetyBuffer), 'ETH');
+            console.log('Safety buffer (2%):', ethers.utils.formatEther(safetyBuffer), 'ETH');
 
             // Return only the transaction parameters
             return {
