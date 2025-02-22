@@ -1139,14 +1139,23 @@ class MXTKMarketMaker {
             const feeData = await this.provider.getFeeData();
             
             // For Arbitrum, we need to adjust the gas estimates
-            const gasLimit = estimatedGas.mul(130).div(100); // Add 30% buffer
+            const gasLimit = estimatedGas.mul(120).div(100); // Reduce buffer to 20%
             const maxFeePerGas = feeData.maxFeePerGas || feeData.gasPrice;
             const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas || ethers.utils.parseUnits("0.1", "gwei");
 
             // Calculate costs for display only
             const maxGasCost = gasLimit.mul(maxFeePerGas);
-            const safetyBuffer = maxGasCost.mul(20).div(100);
+            // Reduce safety buffer to 10% for Arbitrum
+            const safetyBuffer = maxGasCost.mul(10).div(100);
             const totalRequired = maxGasCost.add(safetyBuffer);
+
+            // Log detailed calculation
+            console.log('\nDetailed Gas Calculation:');
+            console.log('Base gas estimate:', estimatedGas.toString());
+            console.log('Adjusted gas limit (+20%):', gasLimit.toString());
+            console.log('Max fee per gas (wei):', maxFeePerGas.toString());
+            console.log('Base cost (wei):', maxGasCost.toString());
+            console.log('Safety buffer (10%):', ethers.utils.formatEther(safetyBuffer), 'ETH');
 
             // Return only the transaction parameters
             return {
@@ -1173,13 +1182,15 @@ class MXTKMarketMaker {
             console.log('Max fee per gas:', ethers.utils.formatUnits(gasCosts.maxFeePerGas, 'gwei'), 'gwei');
             console.log('Max priority fee:', ethers.utils.formatUnits(gasCosts.maxPriorityFeePerGas, 'gwei'), 'gwei');
             console.log('Maximum gas cost:', ethers.utils.formatEther(gasCosts._maxGasCost), 'ETH');
-            console.log('Total required (with buffer):', ethers.utils.formatEther(gasCosts._totalRequired), 'ETH');
+            console.log('Safety buffer:', ethers.utils.formatEther(gasCosts._totalRequired.sub(gasCosts._maxGasCost)), 'ETH');
+            console.log('Total required with buffer:', ethers.utils.formatEther(gasCosts._totalRequired), 'ETH');
             console.log('Available balance:', ethers.utils.formatEther(balance), 'ETH');
 
             if (balance.lt(gasCosts._totalRequired)) {
-                console.log('⚠️ Insufficient ETH for safe transaction:');
+                console.log('\n⚠️ Insufficient ETH for safe transaction:');
                 console.log('Required (with buffer):', ethers.utils.formatEther(gasCosts._totalRequired), 'ETH');
                 console.log('Available:', ethers.utils.formatEther(balance), 'ETH');
+                console.log('Missing:', ethers.utils.formatEther(gasCosts._totalRequired.sub(balance)), 'ETH');
                 return false;
             }
 
