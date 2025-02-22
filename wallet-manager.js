@@ -36,12 +36,34 @@ class WalletManager {
         try {
             // First check if we have environment-based wallets
             if (process.env.WALLET_PRIVATE_KEYS) {
-                const privateKeys = process.env.WALLET_PRIVATE_KEYS.split(',');
-                for (const privateKey of privateKeys) {
-                    const wallet = new ethers.Wallet(privateKey.trim(), this.provider);
-                    this.wallets.push(wallet);
+                const privateKeys = process.env.WALLET_PRIVATE_KEYS.split(',')
+                    .map(key => key.trim())
+                    .filter(key => {
+                        // Validate each key
+                        try {
+                            // Check if it's a valid hex string of correct length
+                            return /^0x[0-9a-fA-F]{64}$|^[0-9a-fA-F]{64}$/.test(key) &&
+                                !key.includes('<') && !key.includes('>');
+                        } catch {
+                            return false;
+                        }
+                    });
+
+                if (privateKeys.length === 0) {
+                    console.warn('No valid private keys found in environment variables');
+                    return;
                 }
-                console.log(`Loaded ${this.wallets.length} wallets from environment`);
+
+                for (const privateKey of privateKeys) {
+                    try {
+                        const wallet = new ethers.Wallet(privateKey, this.provider);
+                        this.wallets.push(wallet);
+                        console.log(`Loaded wallet: ${wallet.address}`);
+                    } catch (error) {
+                        console.error(`Failed to load wallet from private key: ${error.message}`);
+                    }
+                }
+                console.log(`Successfully loaded ${this.wallets.length} wallets from environment`);
                 return;
             }
 
@@ -50,12 +72,25 @@ class WalletManager {
                 const files = fs.readdirSync(this.dataDir);
                 for (const file of files) {
                     if (file.endsWith('.json')) {
-                        const data = JSON.parse(fs.readFileSync(path.join(this.dataDir, file), 'utf8'));
-                        const wallet = new ethers.Wallet(data.privateKey, this.provider);
-                        this.wallets.push(wallet);
+                        try {
+                            const data = JSON.parse(fs.readFileSync(path.join(this.dataDir, file), 'utf8'));
+                            const wallet = new ethers.Wallet(data.privateKey, this.provider);
+                            this.wallets.push(wallet);
+                            console.log(`Loaded wallet from file: ${wallet.address}`);
+                        } catch (error) {
+                            console.error(`Failed to load wallet from file ${file}: ${error.message}`);
+                        }
                     }
                 }
-                console.log(`Loaded ${this.wallets.length} wallets from files`);
+                console.log(`Successfully loaded ${this.wallets.length} wallets from files`);
+            } else {
+                console.log(`Wallet directory does not exist: ${this.dataDir}`);
+            }
+
+            // If no wallets were loaded, create a new one
+            if (this.wallets.length === 0) {
+                console.log('No wallets found, creating new wallet...');
+                await this.createWallet();
             }
         } catch (error) {
             console.error("Error loading wallets:", error);
