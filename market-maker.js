@@ -181,6 +181,32 @@ class MXTKMarketMaker {
         try {
             this.tradingLog('trade', 'Starting Swap Execution');
             
+            // Log the pool we're using
+            const fee = parseInt(process.env.UNISWAP_POOL_FEE);
+            this.tradingLog('trade', 'Pool Details', {
+                tokenIn: tokenIn === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
+                tokenOut: tokenOut === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
+                fee: `${fee/10000}%`,
+                poolAddress: `${this.UNISWAP_V3_FACTORY}/${tokenIn}/${tokenOut}/${fee}`
+            });
+
+            // Get quote first to verify pool exists and has liquidity
+            try {
+                const quoteResult = await this.quoterContract.callStatic.quoteExactInputSingle(
+                    tokenIn,
+                    tokenOut,
+                    fee,
+                    amountIn,
+                    0
+                );
+                this.tradingLog('trade', 'Quote received', {
+                    amountIn: ethers.utils.formatUnits(amountIn, tokenIn === this.USDT_ADDRESS ? 6 : 18),
+                    expectedOut: ethers.utils.formatUnits(quoteResult, tokenOut === this.USDT_ADDRESS ? 6 : 18)
+                });
+            } catch (error) {
+                throw new Error(`Failed to get quote: ${error.message}. This might indicate no pool exists or has no liquidity for the selected fee tier.`);
+            }
+
             // Get current gas prices from network
             const feeData = await this.provider.getFeeData();
             this.tradingLog('gas', 'Current Gas Prices', {
@@ -190,7 +216,6 @@ class MXTKMarketMaker {
             });
 
             // Prepare transaction parameters
-            const fee = parseInt(process.env.UNISWAP_POOL_FEE);
             const deadline = Math.floor(Date.now() / 1000) + 60 * 20;
 
             // Get quote and estimate gas
@@ -202,7 +227,7 @@ class MXTKMarketMaker {
                 recipient: this.masterWallet.address,
                 deadline,
                 amountIn,
-                amountOutMinimum: 0, // Temporary for estimation
+                amountOutMinimum: 0,
                 sqrtPriceLimitX96: 0
             };
 
@@ -315,6 +340,39 @@ class MXTKMarketMaker {
         }
     }
 
+    async verifyPool(tokenA, tokenB, fee) {
+        try {
+            const factoryContract = new ethers.Contract(
+                this.UNISWAP_V3_FACTORY,
+                ['function getPool(address,address,uint24) external view returns (address)'],
+                this.provider
+            );
+            
+            const poolAddress = await factoryContract.getPool(tokenA, tokenB, fee);
+            
+            if (poolAddress === '0x0000000000000000000000000000000000000000') {
+                throw new Error(`No pool exists for tokens with fee ${fee/10000}%`);
+            }
+
+            // Check if pool has liquidity
+            const poolContract = new ethers.Contract(
+                poolAddress,
+                ['function liquidity() external view returns (uint128)'],
+                this.provider
+            );
+            
+            const liquidity = await poolContract.liquidity();
+            
+            if (liquidity.eq(0)) {
+                throw new Error(`Pool exists but has no liquidity`);
+            }
+
+            return poolAddress;
+        } catch (error) {
+            throw new Error(`Pool verification failed: ${error.message}`);
+        }
+    }
+
     async performRandomTrade() {
         try {
             this.tradingLog('system', 'Starting Random Trade');
@@ -377,6 +435,16 @@ class MXTKMarketMaker {
                 availableBalance: ethers.utils.formatUnits(availableBalance, decimals),
                 maxPossible: ethers.utils.formatUnits(maxPossibleAmount, decimals),
                 selectedAmount: ethers.utils.formatUnits(randomAmount, decimals)
+            });
+
+            // Verify pool exists and has liquidity before attempting swap
+            const fee = parseInt(process.env.UNISWAP_POOL_FEE);
+            const poolAddress = await this.verifyPool(tokenIn, tokenOut, fee);
+            
+            this.tradingLog('trade', 'Pool verified', {
+                poolAddress,
+                fee: `${fee/10000}%`,
+                direction: tradeDirection
             });
 
             // Execute the swap
