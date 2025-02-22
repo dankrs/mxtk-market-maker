@@ -6,7 +6,7 @@ services:
     startCommand: node index.js
     envVars:
       - key: PERSISTENT_DIR
-        value: /data
+        value: /opt/render/project/src/data
       - key: NODE_VERSION
         value: 18.15.0
       - key: MORALIS_API_KEY

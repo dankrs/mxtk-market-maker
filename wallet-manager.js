@@ -80,12 +80,15 @@ class WalletManager {
                 created: new Date().toISOString()
             };
             
-            // Write to file with better formatting and error handling
+            // Write to file with more permissive initial permissions
             await fs.promises.writeFile(
                 filePath, 
                 JSON.stringify(data, null, 2), 
-                { mode: 0o600 } // Set restrictive file permissions
+                { mode: 0o644 } // More permissive initial permissions
             );
+            
+            // Then restrict permissions after file is created
+            await fs.promises.chmod(filePath, 0o600);
             
             console.log(`Created and saved new wallet: ${wallet.address}`);
             return wallet;
