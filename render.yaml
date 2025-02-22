@@ -2,7 +2,6 @@ services:
   - type: cron
     name: mxtk-market-maker
     runtime: node
-    schedule: "*/5 * * * *"  # Runs every 5 minutes
     buildCommand: npm install
     startCommand: node index.js
     envVars:
