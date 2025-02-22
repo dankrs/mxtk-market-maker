@@ -407,20 +407,39 @@ class MXTKMarketMaker {
     }
 
     async checkWalletBalances() {
-        // Loop through all managed wallets and check ETH and MXTK balances
-        for (const wallet of this.state.wallets) {
-            const balance = await wallet.getBalance();
-            const tokenBalance = await this.mxtkContract.balanceOf(wallet.address);
+        try {
+            // Loop through all managed wallets and check ETH and MXTK balances
+            for (const wallet of this.state.wallets) {
+                const balance = await wallet.getBalance();
+                const tokenBalance = await this.mxtkContract.balanceOf(wallet.address);
+                const minBalance = ethers.utils.parseEther(process.env.REQUIRED_ETH_PER_WALLET || '0.001');
+                const warningThreshold = ethers.utils.parseEther(process.env.LOW_BALANCE_THRESHOLD || '0.0002');
 
-            if (balance.lt(ethers.utils.parseEther('0.1'))) {
-                await this.sendAlert('Low Balance',
-                    `Wallet ${wallet.address} has low ETH balance: ${ethers.utils.formatEther(balance)}`);
-            }
+                // Log current balances
+                console.log(`\nWallet ${wallet.address} balances:`);
+                console.log(`ETH: ${ethers.utils.formatEther(balance)} ETH`);
+                console.log(`MXTK: ${ethers.utils.formatEther(tokenBalance)} MXTK`);
 
-            if (tokenBalance.lt(ethers.utils.parseEther('100'))) {
-                await this.sendAlert('Low Token Balance',
-                    `Wallet ${wallet.address} has low MXTK balance: ${ethers.utils.formatEther(tokenBalance)}`);
+                if (balance.lt(minBalance)) {
+                    console.log(`⚠️ Wallet ${wallet.address} below minimum ETH balance`);
+                    await this.sendAlert('Low Balance',
+                        `Wallet ${wallet.address} has low ETH balance: ${ethers.utils.formatEther(balance)} ETH (minimum: ${ethers.utils.formatEther(minBalance)} ETH)`);
+                } else if (balance.lt(warningThreshold)) {
+                    console.log(`⚡ Wallet ${wallet.address} approaching low ETH balance`);
+                    await this.sendAlert('Balance Warning',
+                        `Wallet ${wallet.address} approaching low ETH balance: ${ethers.utils.formatEther(balance)} ETH (warning at: ${ethers.utils.formatEther(warningThreshold)} ETH)`);
+                }
+
+                // Only check MXTK balance if it's needed for trading
+                const minTokenBalance = ethers.utils.parseEther('0.001'); // Minimum MXTK balance
+                if (tokenBalance.lt(minTokenBalance)) {
+                    await this.sendAlert('Low Token Balance',
+                        `Wallet ${wallet.address} has low MXTK balance: ${ethers.utils.formatEther(tokenBalance)} MXTK`);
+                }
             }
+        } catch (error) {
+            console.error('Error checking wallet balances:', error);
+            await this.handleError(error);
         }
     }
 
@@ -1139,23 +1158,23 @@ class MXTKMarketMaker {
             const feeData = await this.provider.getFeeData();
             
             // For Arbitrum, we need to adjust the gas estimates
-            const gasLimit = estimatedGas.mul(120).div(100); // Reduce buffer to 20%
+            const gasLimit = estimatedGas.mul(110).div(100); // Reduce buffer to 10%
             const maxFeePerGas = feeData.maxFeePerGas || feeData.gasPrice;
             const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas || ethers.utils.parseUnits("0.1", "gwei");
 
             // Calculate costs for display only
             const maxGasCost = gasLimit.mul(maxFeePerGas);
-            // Reduce safety buffer to 10% for Arbitrum
-            const safetyBuffer = maxGasCost.mul(10).div(100);
+            // Reduce safety buffer to 5% for Arbitrum
+            const safetyBuffer = maxGasCost.mul(5).div(100);
             const totalRequired = maxGasCost.add(safetyBuffer);
 
             // Log detailed calculation
             console.log('\nDetailed Gas Calculation:');
             console.log('Base gas estimate:', estimatedGas.toString());
-            console.log('Adjusted gas limit (+20%):', gasLimit.toString());
+            console.log('Adjusted gas limit (+10%):', gasLimit.toString());
             console.log('Max fee per gas (wei):', maxFeePerGas.toString());
             console.log('Base cost (wei):', maxGasCost.toString());
-            console.log('Safety buffer (10%):', ethers.utils.formatEther(safetyBuffer), 'ETH');
+            console.log('Safety buffer (5%):', ethers.utils.formatEther(safetyBuffer), 'ETH');
 
             // Return only the transaction parameters
             return {
