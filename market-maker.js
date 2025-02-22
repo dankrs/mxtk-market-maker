@@ -421,23 +421,20 @@ class MXTKMarketMaker {
         const originalError = console.error;
         const originalWarn = console.warn;
 
-        // Enhanced logging with categories and emojis
+        // Enhanced logging with categories and emojis - without timestamps
         console.log = (...args) => {
-            const timestamp = new Date().toISOString();
-            originalLog.apply(console, [`[${timestamp}] 📝`, ...args]);
+            originalLog.apply(console, ['📝', ...args]);
         };
 
         console.error = (...args) => {
-            const timestamp = new Date().toISOString();
-            originalError.apply(console, [`[${timestamp}] ❌`, ...args]);
+            originalError.apply(console, ['❌', ...args]);
         };
 
         console.warn = (...args) => {
-            const timestamp = new Date().toISOString();
-            originalWarn.apply(console, [`[${timestamp}] ⚠️`, ...args]);
+            originalWarn.apply(console, ['⚠️', ...args]);
         };
 
-        // Add custom trading logger
+        // Add custom trading logger without timestamps
         this.tradingLog = (type, message, data = {}) => {
             const icons = {
                 trade: '💱',
