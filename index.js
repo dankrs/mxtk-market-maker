@@ -2,8 +2,12 @@
 require('dotenv').config();
 const express = require('express');
 const MXTKMarketMaker = require('./market-maker');
+const initializeStorage = require('./init-storage');
 
 async function startBot() {
+    // Initialize storage first
+    initializeStorage();
+
     const config = {
         isTestnet: process.env.NETWORK === 'testnet',
         maxDailyVolume: process.env.MAX_DAILY_VOLUME || 1000,

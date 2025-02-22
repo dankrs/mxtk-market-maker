@@ -147,6 +147,10 @@ class MXTKMarketMaker {
 
         // Initialize state object for tracking operational data
         this.state = this.getInitialState();
+
+        // Add alert deduplication tracking
+        this.recentAlerts = new Map();
+        this.alertDedupeWindow = 5 * 60 * 1000; // 5 minutes in milliseconds
     }
 
     setupLogging() {
@@ -293,25 +297,46 @@ class MXTKMarketMaker {
         }
     }
 
-    setupAlertSystem() {
-        this.mailer = nodemailer.createTransport({
-            host: process.env.SMTP_HOST,
-            port: process.env.SMTP_PORT,
-            secure: false, // Set to false for port 587
-            requireTLS: true, // Require TLS
-            auth: {
-                user: process.env.SMTP_USER,
-                pass: process.env.SMTP_PASS
-            },
-            tls: {
-                minVersion: 'TLSv1.2' // Specify minimum TLS version
-            }
-        });
+    async setupAlertSystem() {
+        try {
+            // Create email transport
+            this.emailTransport = nodemailer.createTransport({
+                host: process.env.SMTP_HOST,
+                port: process.env.SMTP_PORT,
+                secure: false, // Set to false for port 587
+                requireTLS: true, // Require TLS
+                auth: {
+                    user: process.env.SMTP_USER,
+                    pass: process.env.SMTP_PASS
+                },
+                tls: {
+                    minVersion: 'TLSv1.2' // Specify minimum TLS version
+                }
+            });
+
+            // Test the connection
+            await this.emailTransport.verify();
+            console.log('✅ Email transport configured successfully');
+        } catch (error) {
+            console.error('Failed to setup email transport:', error);
+            // Don't throw error, just log it - allows bot to continue running without email alerts
+        }
     }
 
     async sendAlert(subject, message) {
         if (!this.emailTransport) {
             console.warn('Cannot send alert: Email transport not configured');
+            return;
+        }
+
+        // Create a key for deduplication
+        const alertKey = `${subject}:${message}`;
+        const now = Date.now();
+
+        // Check if we've sent this alert recently
+        const lastSentTime = this.recentAlerts.get(alertKey);
+        if (lastSentTime && (now - lastSentTime) < this.alertDedupeWindow) {
+            console.log(`Skipping duplicate alert: ${subject} (sent ${Math.round((now - lastSentTime)/1000)}s ago)`);
             return;
         }
 
@@ -325,8 +350,25 @@ class MXTKMarketMaker {
 
             await this.emailTransport.sendMail(mailOptions);
             console.log(`✅ Alert sent: ${subject}`);
+            
+            // Record this alert
+            this.recentAlerts.set(alertKey, now);
+
+            // Cleanup old alerts
+            for (const [key, time] of this.recentAlerts.entries()) {
+                if (now - time > this.alertDedupeWindow) {
+                    this.recentAlerts.delete(key);
+                }
+            }
         } catch (error) {
-            console.error('Failed to send email alert:', error);
+            console.error('Failed to send email alert:', error.message);
+            console.error('Error details:', {
+                host: process.env.SMTP_HOST,
+                port: process.env.SMTP_PORT,
+                from: process.env.ALERT_FROM_EMAIL,
+                to: process.env.ALERT_TO_EMAIL,
+                error: error
+            });
         }
     }
 
@@ -784,7 +826,11 @@ class MXTKMarketMaker {
     }
 
     async handleError(error) {
-        await this.sendAlert('Error', error.message);
+        // Don't send alert if it's already been handled
+        if (!error.handled) {
+            error.handled = true;
+            await this.sendAlert('Error', error.message);
+        }
         
         if (this.state.recoveryAttempts < this.config.maxRetries) {
             this.state.recoveryAttempts++;
@@ -1024,7 +1070,10 @@ class MXTKMarketMaker {
                 throw new Error('TARGET_SPREAD cannot be greater than MAX_SPREAD');
             }
 
-            // Continue with existing initialization code
+            // Setup alert system before other operations
+            await this.setupAlertSystem();
+
+            // Continue with rest of initialization
             await this.loadState();
             await this.initializeServices();
             

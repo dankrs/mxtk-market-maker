@@ -13,13 +13,20 @@ class WalletManager {
      * @param {Object} config - Configuration object.
      * @param {string} config.dataDir - Directory where wallet files will be stored.
      */
-    constructor(config) {
-        this.dataDir = config.dataDir || path.join(__dirname, '.wallets');
+    constructor(provider) {
+        // Use persistent storage path for Render.com
+        this.dataDir = process.env.PERSISTENT_DIR 
+            ? path.join(process.env.PERSISTENT_DIR, '.wallets')
+            : path.join(__dirname, '.wallets');
+            
+        this.provider = provider;
+        this.wallets = [];
+        
         // Ensure the data directory exists
         if (!fs.existsSync(this.dataDir)) {
             fs.mkdirSync(this.dataDir, { recursive: true });
+            console.log(`Created wallet directory at: ${this.dataDir}`);
         }
-        this.wallets = [];
     }
 
     /**
@@ -27,17 +34,32 @@ class WalletManager {
      */
     async loadWallets() {
         try {
-            const files = fs.readdirSync(this.dataDir);
-            for (const file of files) {
-                if (file.endsWith('.json')) {
-                    const data = JSON.parse(fs.readFileSync(path.join(this.dataDir, file), 'utf8'));
-                    const wallet = new ethers.Wallet(data.privateKey);
+            // First check if we have environment-based wallets
+            if (process.env.WALLET_PRIVATE_KEYS) {
+                const privateKeys = process.env.WALLET_PRIVATE_KEYS.split(',');
+                for (const privateKey of privateKeys) {
+                    const wallet = new ethers.Wallet(privateKey.trim(), this.provider);
                     this.wallets.push(wallet);
                 }
+                console.log(`Loaded ${this.wallets.length} wallets from environment`);
+                return;
             }
-            console.log(`Loaded ${this.wallets.length} wallets.`);
+
+            // Otherwise load from files
+            if (fs.existsSync(this.dataDir)) {
+                const files = fs.readdirSync(this.dataDir);
+                for (const file of files) {
+                    if (file.endsWith('.json')) {
+                        const data = JSON.parse(fs.readFileSync(path.join(this.dataDir, file), 'utf8'));
+                        const wallet = new ethers.Wallet(data.privateKey, this.provider);
+                        this.wallets.push(wallet);
+                    }
+                }
+                console.log(`Loaded ${this.wallets.length} wallets from files`);
+            }
         } catch (error) {
             console.error("Error loading wallets:", error);
+            throw error;
         }
     }
 
@@ -47,19 +69,25 @@ class WalletManager {
      */
     async createWallet() {
         try {
-            const wallet = ethers.Wallet.createRandom();
+            const wallet = ethers.Wallet.createRandom().connect(this.provider);
             this.wallets.push(wallet);
             
-            // Save wallet data in plain text JSON
+            // Save wallet data
             const filePath = path.join(this.dataDir, `${wallet.address}.json`);
             const data = {
                 address: wallet.address,
-                privateKey: wallet.privateKey
+                privateKey: wallet.privateKey,
+                created: new Date().toISOString()
             };
             
-            // Write to file in plain text
-            fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
-            console.log(`Created new wallet: ${wallet.address}`);
+            // Write to file with better formatting and error handling
+            await fs.promises.writeFile(
+                filePath, 
+                JSON.stringify(data, null, 2), 
+                { mode: 0o600 } // Set restrictive file permissions
+            );
+            
+            console.log(`Created and saved new wallet: ${wallet.address}`);
             return wallet;
         } catch (error) {
             console.error("Error creating wallet:", error);
@@ -77,8 +105,15 @@ class WalletManager {
 
     async getWalletPrivateKey(address) {
         try {
+            // First check environment variables
+            if (process.env.WALLET_PRIVATE_KEYS) {
+                const wallet = this.wallets.find(w => w.address.toLowerCase() === address.toLowerCase());
+                if (wallet) return wallet.privateKey;
+            }
+
+            // Then check files
             const filePath = path.join(this.dataDir, `${address}.json`);
-            const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            const data = JSON.parse(await fs.promises.readFile(filePath, 'utf8'));
             return data.privateKey;
         } catch (error) {
             console.error(`Error getting private key for wallet ${address}:`, error);

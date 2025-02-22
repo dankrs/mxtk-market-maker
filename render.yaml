@@ -1,0 +1,32 @@
+services:
+  - type: cron
+    name: mxtk-market-maker
+    runtime: node
+    schedule: "*/5 * * * *"  # Runs every 5 minutes
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: PERSISTENT_DIR
+        value: /data
+      - key: NODE_VERSION
+        value: 18.15.0
+      - key: MORALIS_API_KEY
+        sync: false
+      - key: ARBITRUM_MAINNET_RPC
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: MASTER_WALLET_PRIVATE_KEY
+        sync: false
+      - key: WALLET_PRIVATE_KEYS
+        sync: false
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1 
