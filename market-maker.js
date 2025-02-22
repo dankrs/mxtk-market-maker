@@ -919,9 +919,12 @@ class MXTKMarketMaker {
             console.log(`ETH: ${ethers.utils.formatEther(masterEthBalance)} ETH`);
             console.log(`USDT: ${ethers.utils.formatUnits(masterUsdtBalance, 6)} USDT`);
 
-            // Calculate required ETH (0.001 ETH per wallet)
-            const requiredEthPerWallet = ethers.utils.parseEther('0.001');
+            // Calculate required ETH using environment variable
+            const requiredEthPerWallet = ethers.utils.parseEther(process.env.REQUIRED_ETH_PER_WALLET || '0.0001');
             const totalRequiredEth = requiredEthPerWallet.mul(this.state.wallets.length);
+
+            console.log(`Required ETH per wallet: ${ethers.utils.formatEther(requiredEthPerWallet)} ETH`);
+            console.log(`Total required ETH: ${ethers.utils.formatEther(totalRequiredEth)} ETH`);
 
             // Check if master wallet has enough ETH
             if (masterEthBalance.lt(totalRequiredEth)) {
@@ -939,6 +942,8 @@ class MXTKMarketMaker {
                     const amountToSend = requiredEthPerWallet.sub(walletBalance);
                     
                     console.log(`\nSending ${ethers.utils.formatEther(amountToSend)} ETH to ${wallet.address}`);
+                    console.log(`Current balance: ${ethers.utils.formatEther(walletBalance)} ETH`);
+                    console.log(`Target balance: ${ethers.utils.formatEther(requiredEthPerWallet)} ETH`);
                     
                     // Get gas estimate for the transfer
                     const gasEstimate = await masterWallet.estimateGas({
@@ -966,7 +971,7 @@ class MXTKMarketMaker {
                     await tx.wait();
                     console.log('✅ ETH transfer complete');
                 } else {
-                    console.log(`\nWallet ${wallet.address} already has sufficient ETH`);
+                    console.log(`\nWallet ${wallet.address} already has sufficient ETH (${ethers.utils.formatEther(walletBalance)} ETH)`);
                 }
             }
 
