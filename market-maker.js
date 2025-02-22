@@ -63,9 +63,6 @@ class MXTKMarketMaker {
             // Check balances and approvals
             await this.checkBalancesAndApprovals();
 
-            // Initialize WebSocket connection for monitoring
-            this.initializeWebSocket();
-
             this.tradingLog('system', '✅ Initialization complete');
         } catch (error) {
             this.tradingLog('system', '❌ Initialization failed', {
@@ -419,86 +416,6 @@ class MXTKMarketMaker {
         }
     }
 
-    initializeWebSocket() {
-        try {
-            // Track important trading metrics
-            let lastGasPrice = null;
-            let lastLoggedBlock = 0;
-            let significantGasChange = false;
-
-            // Setup WebSocket connection for real-time monitoring
-            this.provider.on('pending', async (txHash) => {
-                try {
-                    const tx = await this.provider.getTransaction(txHash);
-                    // Only monitor our own transactions or Uniswap router transactions
-                    if (tx && (
-                        tx.from.toLowerCase() === this.masterWallet.address.toLowerCase() ||
-                        tx.to === this.UNISWAP_V3_ROUTER
-                    )) {
-                        console.log(`🔍 Monitoring transaction: ${txHash.slice(0, 10)}...`);
-                    }
-                } catch (error) {
-                    console.error('Error monitoring transaction:', error);
-                }
-            });
-
-            // Enhanced block monitoring
-            this.provider.on('block', async (blockNumber) => {
-                try {
-                    const feeData = await this.provider.getFeeData();
-                    const currentGasPrice = feeData.lastBaseFeePerGas;
-
-                    // Check for significant gas price changes (>20%)
-                    if (lastGasPrice && currentGasPrice) {
-                        const change = Math.abs(currentGasPrice.sub(lastGasPrice))
-                            .mul(100)
-                            .div(lastGasPrice);
-                        significantGasChange = change.gt(20); // 20% threshold
-                    }
-
-                    // Log on significant events or every 100 blocks
-                    if (significantGasChange || blockNumber - lastLoggedBlock >= 100) {
-                        console.log('📊 Network Status:', {
-                            block: blockNumber,
-                            gas: {
-                                base: feeData.lastBaseFeePerGas ? 
-                                    `${ethers.utils.formatUnits(feeData.lastBaseFeePerGas, 'gwei')} gwei` : 'N/A',
-                                max: feeData.maxFeePerGas ?
-                                    `${ethers.utils.formatUnits(feeData.maxFeePerGas, 'gwei')} gwei` : 'N/A'
-                            },
-                            ...(significantGasChange && {
-                                alert: '⚠️ Significant gas price change detected'
-                            })
-                        });
-
-                        lastLoggedBlock = blockNumber;
-                        lastGasPrice = currentGasPrice;
-                        significantGasChange = false;
-                    }
-                } catch (error) {
-                    console.error('Block monitoring error:', {
-                        blockNumber,
-                        error: error.message
-                    });
-                }
-            });
-
-            // Add error event handler
-            this.provider.on('error', (error) => {
-                console.error('🚨 WebSocket connection error:', error);
-                // Attempt to reconnect
-                setTimeout(() => {
-                    console.log('Attempting to reconnect WebSocket...');
-                    this.initializeWebSocket();
-                }, 5000);
-            });
-
-            console.log('✅ WebSocket monitoring initialized');
-        } catch (error) {
-            console.error('Error initializing WebSocket:', error);
-        }
-    }
-
     setupLogging() {
         const originalLog = console.log;
         const originalError = console.error;
@@ -548,14 +465,19 @@ class MXTKMarketMaker {
                     const delay = await this.performRandomTrade();
 
                     this.tradingLog('system', 'Waiting for next trade', {
-                        delay: `${delay} seconds`
+                        delay: `${delay} seconds`,
+                        nextTradeAt: new Date(Date.now() + delay * 1000).toISOString()
                     });
 
                     // Wait for random delay before next trade
                     await new Promise(resolve => setTimeout(resolve, delay * 1000));
                 } catch (error) {
                     this.tradingLog('system', '❌ Error in trading loop', {
-                        error: error.message
+                        error: error.message,
+                        errorType: error.constructor.name,
+                        // Add retry information
+                        retryIn: '60 seconds',
+                        retryAt: new Date(Date.now() + 60000).toISOString()
                     });
                     // Wait 1 minute before retrying
                     await new Promise(resolve => setTimeout(resolve, 60000));
@@ -564,6 +486,7 @@ class MXTKMarketMaker {
         } catch (error) {
             this.tradingLog('system', '❌ Fatal error in market maker', {
                 error: error.message,
+                errorType: error.constructor.name,
                 stack: error.stack
             });
             throw error;
