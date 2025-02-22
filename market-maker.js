@@ -579,24 +579,20 @@ class MXTKMarketMaker {
     }
 
     async verifyPool(tokenA, tokenB, fee) {
+        let normalizedTokenA, normalizedTokenB;
         try {
             // Normalize addresses first
-            const normalizedTokenA = ethers.utils.getAddress(tokenA);
-            const normalizedTokenB = ethers.utils.getAddress(tokenB);
+            normalizedTokenA = await this.normalizeAddress(tokenA);
+            normalizedTokenB = await this.normalizeAddress(tokenB);
             
             // Ensure tokens are in correct order (lower address first)
-            let token0, token1;
             if (normalizedTokenA.toLowerCase() > normalizedTokenB.toLowerCase()) {
-                token0 = normalizedTokenB;
-                token1 = normalizedTokenA;
-            } else {
-                token0 = normalizedTokenA;
-                token1 = normalizedTokenB;
+                [normalizedTokenA, normalizedTokenB] = [normalizedTokenB, normalizedTokenA];
             }
             
             this.tradingLog('system', 'Verifying pool with ordered tokens', {
-                token0: token0 === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
-                token1: token1 === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
+                token0: normalizedTokenA === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
+                token1: normalizedTokenB === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
                 fee: `${fee/10000}%`
             });
 
@@ -607,11 +603,11 @@ class MXTKMarketMaker {
                 this.provider
             );
             
-            const poolAddress = await factoryContract.getPool(token0, token1, fee);
+            const poolAddress = await factoryContract.getPool(normalizedTokenA, normalizedTokenB, fee);
             
             // Check if pool exists
             if (poolAddress === ethers.constants.AddressZero) {
-                throw new Error(`No pool exists for ${token0}/${token1} with fee ${fee/10000}%`);
+                throw new Error(`No pool exists for ${normalizedTokenA}/${normalizedTokenB} with fee ${fee/10000}%`);
             }
 
             // Initialize pool contract to check its state
@@ -635,8 +631,8 @@ class MXTKMarketMaker {
             ]);
 
             // Verify token ordering matches
-            if (actualToken0.toLowerCase() !== token0.toLowerCase() ||
-                actualToken1.toLowerCase() !== token1.toLowerCase()) {
+            if (actualToken0.toLowerCase() !== normalizedTokenA.toLowerCase() ||
+                actualToken1.toLowerCase() !== normalizedTokenB.toLowerCase()) {
                 throw new Error('Pool token ordering mismatch');
             }
 
@@ -648,8 +644,8 @@ class MXTKMarketMaker {
             // Log pool verification success
             this.tradingLog('system', '✅ Pool verification successful', {
                 poolAddress: ethers.utils.getAddress(poolAddress),
-                token0: token0 === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
-                token1: token1 === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
+                token0: normalizedTokenA === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
+                token1: normalizedTokenB === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
                 liquidity: liquidity.toString(),
                 sqrtPriceX96: slot0.sqrtPriceX96.toString(),
                 tick: slot0.tick.toString()
@@ -657,8 +653,8 @@ class MXTKMarketMaker {
 
             return {
                 poolAddress: ethers.utils.getAddress(poolAddress),
-                token0,
-                token1,
+                token0: normalizedTokenA,
+                token1: normalizedTokenB,
                 liquidity: liquidity.toString(),
                 sqrtPriceX96: slot0.sqrtPriceX96.toString(),
                 tick: slot0.tick
@@ -666,23 +662,14 @@ class MXTKMarketMaker {
 
         } catch (error) {
             this.tradingLog('system', '❌ Pool verification failed', {
-                tokenA: normalizedTokenA,
-                tokenB: normalizedTokenB,
+                tokenA: tokenA,
+                tokenB: tokenB,
+                normalizedTokenA: normalizedTokenA || 'normalization failed',
+                normalizedTokenB: normalizedTokenB || 'normalization failed',
                 fee: `${fee/10000}%`,
                 error: error.message
             });
             
-            // Send email notification for pool verification failures
-            await this.sendErrorEmail('Pool Verification Failed', {
-                type: 'Pool Error',
-                message: error.message,
-                additional: {
-                    tokenA: normalizedTokenA === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
-                    tokenB: normalizedTokenB === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
-                    fee: `${fee/10000}%`
-                }
-            });
-
             throw error;
         }
     }
