@@ -908,115 +908,72 @@ class MXTKMarketMaker {
 
     async distributeInitialFunds() {
         try {
-            console.log('\n=== Master Wallet Status (Arbitrum) ===');
-            
             // Get master wallet
-            const masterWallet = new ethers.Wallet(
-                process.env.MASTER_WALLET_PRIVATE_KEY,
-                this.provider
-            );
-            console.log('Master wallet address:', masterWallet.address);
-
-            // Check master wallet balances
-            const masterEthBalance = await this.provider.getBalance(masterWallet.address);
+            const masterWallet = new ethers.Wallet(process.env.MASTER_WALLET_PRIVATE_KEY, this.provider);
+            
+            // Get current balances
+            const masterEthBalance = await masterWallet.getBalance();
             const masterUsdtBalance = await this.usdtContract.balanceOf(masterWallet.address);
-            const usdtDecimals = await this.usdtContract.decimals();
-            
-            const masterEthBalanceFormatted = ethers.utils.formatEther(masterEthBalance);
-            const masterUsdtBalanceFormatted = ethers.utils.formatUnits(masterUsdtBalance, usdtDecimals);
-            
-            console.log('Master Wallet Balances:');
-            console.log(`ETH: ${masterEthBalanceFormatted} ETH`);
-            console.log(`USDT: ${masterUsdtBalanceFormatted} USDT`);
 
-            // Calculate required balances
-            const requiredEthPerWallet = 0.001; // 0.001 ETH per wallet
-            const requiredUsdtPerWallet = 1; // 1 USDT per wallet
-            const totalWallets = this.state.wallets.length;
-            const totalRequiredEth = requiredEthPerWallet * totalWallets;
-            const totalRequiredUsdt = requiredUsdtPerWallet * totalWallets;
+            console.log('\nMaster Wallet Balances:');
+            console.log(`ETH: ${ethers.utils.formatEther(masterEthBalance)} ETH`);
+            console.log(`USDT: ${ethers.utils.formatUnits(masterUsdtBalance, 6)} USDT`);
 
-            // Validate master wallet has sufficient funds
-            if (parseFloat(masterEthBalanceFormatted) < totalRequiredEth) {
-                throw new Error(`Insufficient ETH in master wallet. Need: ${totalRequiredEth} ETH, Have: ${masterEthBalanceFormatted} ETH`);
-            }
-            
-            if (parseFloat(masterUsdtBalanceFormatted) < totalRequiredUsdt) {
-                throw new Error(`Insufficient USDT in master wallet. Need: ${totalRequiredUsdt} USDT, Have: ${masterUsdtBalanceFormatted} USDT`);
+            // Calculate required ETH (0.001 ETH per wallet)
+            const requiredEthPerWallet = ethers.utils.parseEther('0.001');
+            const totalRequiredEth = requiredEthPerWallet.mul(this.state.wallets.length);
+
+            // Check if master wallet has enough ETH
+            if (masterEthBalance.lt(totalRequiredEth)) {
+                throw new Error(
+                    `Insufficient ETH in master wallet. Need: ${ethers.utils.formatEther(totalRequiredEth)} ETH, ` +
+                    `Have: ${ethers.utils.formatEther(masterEthBalance)} ETH`
+                );
             }
 
-            // First approve USDT spending
-            console.log('\n=== Approving USDT transfers ===');
-            const usdtWithSigner = this.usdtContract.connect(masterWallet);
-
-            // Distribute funds to trading wallets
-            console.log('\n=== Distributing Funds to Trading Wallets ===');
+            // Distribute ETH to each wallet that needs it
             for (const wallet of this.state.wallets) {
-                console.log(`\nProcessing wallet: ${wallet.address}`);
+                const walletBalance = await wallet.getBalance();
                 
-                // Check current balances
-                const ethBalance = await this.provider.getBalance(wallet.address);
-                const usdtBalance = await this.usdtContract.balanceOf(wallet.address);
-                
-                const ethBalanceFormatted = ethers.utils.formatEther(ethBalance);
-                const usdtBalanceFormatted = ethers.utils.formatUnits(usdtBalance, usdtDecimals);
-                
-                console.log('Current balances:');
-                console.log(`ETH: ${ethBalanceFormatted} ETH`);
-                console.log(`USDT: ${usdtBalanceFormatted} USDT`);
-
-                // Send ETH if needed
-                if (parseFloat(ethBalanceFormatted) < requiredEthPerWallet) {
-                    const ethToSend = ethers.utils.parseEther(
-                        (requiredEthPerWallet - parseFloat(ethBalanceFormatted)).toFixed(18)
-                    );
+                if (walletBalance.lt(requiredEthPerWallet)) {
+                    const amountToSend = requiredEthPerWallet.sub(walletBalance);
                     
-                    console.log(`Sending ${ethers.utils.formatEther(ethToSend)} ETH...`);
+                    console.log(`\nSending ${ethers.utils.formatEther(amountToSend)} ETH to ${wallet.address}`);
                     
-                    const ethTx = await masterWallet.sendTransaction({
+                    // Get gas estimate for the transfer
+                    const gasEstimate = await masterWallet.estimateGas({
                         to: wallet.address,
-                        value: ethToSend,
-                        gasLimit: this.config.gasLimit
+                        value: amountToSend
                     });
+
+                    // Add 10% buffer to gas estimate
+                    const gasLimit = gasEstimate.mul(110).div(100);
+
+                    // Get current gas price
+                    const feeData = await this.provider.getFeeData();
                     
-                    await ethTx.wait();
+                    // Send ETH
+                    const tx = await masterWallet.sendTransaction({
+                        to: wallet.address,
+                        value: amountToSend,
+                        gasLimit,
+                        maxFeePerGas: feeData.maxFeePerGas,
+                        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
+                        type: 2
+                    });
+
+                    console.log(`Transaction hash: ${tx.hash}`);
+                    await tx.wait();
                     console.log('✅ ETH transfer complete');
+                } else {
+                    console.log(`\nWallet ${wallet.address} already has sufficient ETH`);
                 }
-
-                // Send USDT if needed
-                if (parseFloat(usdtBalanceFormatted) < requiredUsdtPerWallet) {
-                    const usdtToSend = ethers.utils.parseUnits(
-                        (requiredUsdtPerWallet - parseFloat(usdtBalanceFormatted)).toFixed(6),
-                        usdtDecimals
-                    );
-                    
-                    console.log(`Sending ${ethers.utils.formatUnits(usdtToSend, usdtDecimals)} USDT...`);
-                    
-                    // Use the signer-connected contract for transfer
-                    const usdtTx = await usdtWithSigner.transfer(
-                        wallet.address,
-                        usdtToSend,
-                        { gasLimit: this.config.gasLimit }
-                    );
-                    
-                    await usdtTx.wait();
-                    console.log('✅ USDT transfer complete');
-                }
-
-                // Verify final balances
-                const finalEthBalance = await this.provider.getBalance(wallet.address);
-                const finalUsdtBalance = await this.usdtContract.balanceOf(wallet.address);
-                
-                console.log('\nFinal balances:');
-                console.log(`ETH: ${ethers.utils.formatEther(finalEthBalance)} ETH`);
-                console.log(`USDT: ${ethers.utils.formatUnits(finalUsdtBalance, usdtDecimals)} USDT`);
             }
-            
-            console.log('\n✅ Fund distribution completed successfully\n');
+
+            console.log('\n✅ Initial fund distribution complete');
 
         } catch (error) {
             console.error('Error during fund distribution:', error);
-            await this.handleError(error);
             throw error;
         }
     }
