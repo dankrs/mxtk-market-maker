@@ -49,11 +49,13 @@ class MXTKMarketMaker {
 
     async initialize() {
         try {
-            console.log('Initializing MXTK Market Maker...');
+            this.tradingLog('system', 'Initializing MXTK Market Maker...');
 
             // Initialize master wallet
             this.masterWallet = new ethers.Wallet(process.env.MASTER_WALLET_PRIVATE_KEY, this.provider);
-            console.log(`Master wallet address: ${this.masterWallet.address}`);
+            this.tradingLog('system', 'Master wallet initialized', {
+                address: this.masterWallet.address
+            });
 
             // Initialize contracts
             await this.initializeContracts();
@@ -64,14 +66,18 @@ class MXTKMarketMaker {
             // Initialize WebSocket connection for monitoring
             this.initializeWebSocket();
 
-            console.log('✅ Initialization complete');
+            this.tradingLog('system', '✅ Initialization complete');
         } catch (error) {
-            console.error('Error in initialization:', error);
+            this.tradingLog('system', '❌ Initialization failed', {
+                error: error.message
+            });
             throw error;
         }
     }
 
     async initializeContracts() {
+        this.tradingLog('system', 'Initializing contracts...');
+        
         // Initialize MXTK contract
         this.mxtkContract = new ethers.Contract(
             this.MXTK_ADDRESS,
@@ -81,7 +87,7 @@ class MXTKMarketMaker {
                 'function balanceOf(address account) public view returns (uint256)',
                 'function decimals() public view returns (uint8)'
             ],
-            this.masterWallet // Connect with master wallet directly
+            this.masterWallet
         );
 
         // Initialize USDT contract
@@ -93,7 +99,7 @@ class MXTKMarketMaker {
                 'function balanceOf(address account) public view returns (uint256)',
                 'function decimals() public view returns (uint8)'
             ],
-            this.masterWallet // Connect with master wallet directly
+            this.masterWallet
         );
 
         // Initialize Uniswap contracts
@@ -115,23 +121,31 @@ class MXTKMarketMaker {
             this.masterWallet
         );
 
-        console.log('✅ Contracts initialized');
+        this.tradingLog('system', '✅ Contracts initialized');
     }
 
     async checkBalancesAndApprovals() {
+        this.tradingLog('system', 'Checking balances and approvals...');
+
         // Check ETH balance
         const ethBalance = await this.masterWallet.getBalance();
-        console.log(`ETH balance: ${ethers.utils.formatEther(ethBalance)} ETH`);
+        this.tradingLog('balance', 'ETH balance', {
+            amount: `${ethers.utils.formatEther(ethBalance)} ETH`
+        });
 
         // Check USDT balance
         const usdtBalance = await this.usdtContract.balanceOf(this.masterWallet.address);
-        console.log(`USDT balance: ${ethers.utils.formatUnits(usdtBalance, 6)} USDT`);
+        this.tradingLog('balance', 'USDT balance', {
+            amount: `${ethers.utils.formatUnits(usdtBalance, 6)} USDT`
+        });
 
         // Check MXTK balance
         const mxtkBalance = await this.mxtkContract.balanceOf(this.masterWallet.address);
-        console.log(`MXTK balance: ${ethers.utils.formatEther(mxtkBalance)} MXTK`);
+        this.tradingLog('balance', 'MXTK balance', {
+            amount: `${ethers.utils.formatEther(mxtkBalance)} MXTK`
+        });
 
-        // Check and set approvals if needed
+        // Check and set approvals
         await this.checkAndSetApprovals();
     }
 
@@ -152,30 +166,31 @@ class MXTKMarketMaker {
 
         // Set approvals if needed
         if (usdtAllowance.eq(0)) {
-            console.log('Approving USDT...');
+            this.tradingLog('system', 'Approving USDT...');
             const tx = await this.usdtContract.approve(this.UNISWAP_V3_ROUTER, MAX_UINT256);
             await tx.wait();
-            console.log('✅ USDT approved');
+            this.tradingLog('system', '✅ USDT approved');
         }
 
         if (mxtkAllowance.eq(0)) {
-            console.log('Approving MXTK...');
+            this.tradingLog('system', 'Approving MXTK...');
             const tx = await this.mxtkContract.approve(this.UNISWAP_V3_ROUTER, MAX_UINT256);
             await tx.wait();
-            console.log('✅ MXTK approved');
+            this.tradingLog('system', '✅ MXTK approved');
         }
     }
 
     async executeSwap(tokenIn, tokenOut, amountIn, isExactIn = true) {
         try {
-            console.log('\n=== Starting Swap Execution ===');
+            this.tradingLog('trade', 'Starting Swap Execution');
             
             // Get current gas prices from network
             const feeData = await this.provider.getFeeData();
-            console.log('\nCurrent Gas Prices:');
-            console.log('Base Fee:', ethers.utils.formatUnits(feeData.lastBaseFeePerGas || feeData.gasPrice, 'gwei'), 'gwei');
-            console.log('Max Priority Fee:', ethers.utils.formatUnits(feeData.maxPriorityFeePerGas, 'gwei'), 'gwei');
-            console.log('Max Fee Per Gas:', ethers.utils.formatUnits(feeData.maxFeePerGas, 'gwei'), 'gwei');
+            this.tradingLog('gas', 'Current Gas Prices', {
+                baseFee: `${ethers.utils.formatUnits(feeData.lastBaseFeePerGas || feeData.gasPrice, 'gwei')} gwei`,
+                maxPriorityFee: `${ethers.utils.formatUnits(feeData.maxPriorityFeePerGas, 'gwei')} gwei`,
+                maxFeePerGas: `${ethers.utils.formatUnits(feeData.maxFeePerGas, 'gwei')} gwei`
+            });
 
             // Prepare transaction parameters
             const fee = parseInt(process.env.UNISWAP_POOL_FEE);
@@ -241,36 +256,42 @@ class MXTKMarketMaker {
                 type: 2 // EIP-1559 transaction
             });
 
-            console.log('\nTransaction sent:', tx.hash);
+            this.tradingLog('trade', 'Transaction sent', { 
+                hash: tx.hash,
+                gasLimit: gasEstimate.toString(),
+                maxFeePerGas: `${ethers.utils.formatUnits(feeData.maxFeePerGas, 'gwei')} gwei`
+            });
+
             console.log('Waiting for confirmation...');
 
             const receipt = await tx.wait();
             
-            // Log transaction details
-            console.log('\nTransaction confirmed!');
-            console.log('Actual gas used:', receipt.gasUsed.toString());
-            console.log('Effective gas price:', ethers.utils.formatUnits(receipt.effectiveGasPrice, 'gwei'), 'gwei');
-            console.log('Total gas cost:', ethers.utils.formatEther(receipt.gasUsed.mul(receipt.effectiveGasPrice)), 'ETH');
+            this.tradingLog('trade', 'Transaction confirmed', {
+                gasUsed: receipt.gasUsed.toString(),
+                effectiveGasPrice: `${ethers.utils.formatUnits(receipt.effectiveGasPrice, 'gwei')} gwei`,
+                totalGasCost: `${ethers.utils.formatEther(receipt.gasUsed.mul(receipt.effectiveGasPrice))} ETH`
+            });
 
             // Log balance changes
             const balanceAfter = await this.masterWallet.getBalance();
-            console.log('\nETH balance change:', ethers.utils.formatEther(balanceAfter.sub(ethBalance)), 'ETH');
+            this.tradingLog('balance', 'ETH balance change', {
+                change: `${ethers.utils.formatEther(balanceAfter.sub(ethBalance))} ETH`
+            });
 
-            console.log('=== Swap Execution Complete ===\n');
+            this.tradingLog('trade', 'Swap Execution Complete');
             return receipt;
         } catch (error) {
-            console.error('\n❌ Swap execution failed:');
-            console.error('Error type:', error.constructor.name);
-            console.error('Error message:', error.message);
-            if (error.transaction) {
-                console.error('Transaction details:', {
-                    hash: error.transaction.hash,
-                    from: error.transaction.from,
-                    to: error.transaction.to,
-                    value: error.transaction.value.toString(),
-                    gasLimit: error.transaction.gasLimit.toString()
-                });
-            }
+            this.tradingLog('trade', '❌ Swap execution failed', {
+                error: error.message,
+                ...(error.transaction && {
+                    transaction: {
+                        hash: error.transaction.hash,
+                        from: error.transaction.from,
+                        to: error.transaction.to,
+                        value: error.transaction.value.toString()
+                    }
+                })
+            });
             throw error;
         }
     }
@@ -282,22 +303,30 @@ class MXTKMarketMaker {
                 ['function balanceOf(address) view returns (uint256)'],
                 this.provider
             );
-            return await contract.balanceOf(this.masterWallet.address);
+            const balance = await contract.balanceOf(this.masterWallet.address);
+            this.tradingLog('balance', 'Token balance retrieved', {
+                token: tokenAddress,
+                balance: ethers.utils.formatUnits(balance, 18)
+            });
+            return balance;
         } catch (error) {
-            console.error('Error getting token balance:', error);
+            this.tradingLog('system', '❌ Error getting token balance', {
+                token: tokenAddress,
+                error: error.message
+            });
             throw error;
         }
     }
 
     async performRandomTrade() {
         try {
-            console.log('\n=== Starting Random Trade ===');
+            this.tradingLog('system', 'Starting Random Trade');
             
             // Get current balances
             const usdtBalance = await this.usdtContract.balanceOf(this.masterWallet.address);
             const mxtkBalance = await this.mxtkContract.balanceOf(this.masterWallet.address);
             
-            console.log('Current balances:', {
+            this.tradingLog('balance', 'Current balances', {
                 USDT: ethers.utils.formatUnits(usdtBalance, 6),
                 MXTK: ethers.utils.formatEther(mxtkBalance)
             });
@@ -310,7 +339,7 @@ class MXTKMarketMaker {
                 tokenOut = this.MXTK_ADDRESS;
                 tradeDirection = 'USDT_TO_MXTK';
                 availableBalance = usdtBalance;
-                console.log('Executing first trade: USDT → MXTK');
+                this.tradingLog('trade', 'Executing first trade: USDT → MXTK');
                 this.isFirstTrade = false;
             } else {
                 // Random direction for subsequent trades
@@ -319,7 +348,7 @@ class MXTKMarketMaker {
                 tokenOut = isUsdtToMxtk ? this.MXTK_ADDRESS : this.USDT_ADDRESS;
                 tradeDirection = isUsdtToMxtk ? 'USDT_TO_MXTK' : 'MXTK_TO_USDT';
                 availableBalance = isUsdtToMxtk ? usdtBalance : mxtkBalance;
-                console.log(`Random trade direction selected: ${tradeDirection}`);
+                this.tradingLog('trade', `Selected direction: ${tradeDirection}`);
             }
 
             // Calculate maximum possible trade amount based on balance
@@ -344,7 +373,7 @@ class MXTKMarketMaker {
                     .div(1000)
             );
 
-            console.log('Trade details:', {
+            this.tradingLog('trade', 'Trade parameters', {
                 direction: tradeDirection,
                 tokenIn: tokenIn === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
                 tokenOut: tokenOut === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
@@ -361,15 +390,13 @@ class MXTKMarketMaker {
 
             // Generate random delay for next trade
             const delay = Math.floor(Math.random() * (this.MAX_DELAY - this.MIN_DELAY + 1) + this.MIN_DELAY);
-            console.log(`Next trade in ${delay} seconds`);
+            this.tradingLog('system', `Next trade scheduled`, { delay: `${delay} seconds` });
 
-            console.log('=== Random Trade Complete ===\n');
+            this.tradingLog('system', 'Random Trade Complete');
             return delay;
         } catch (error) {
-            console.error('\n❌ Random trade failed:');
-            console.error('Error details:', {
-                message: error.message,
-                stack: error.stack,
+            this.tradingLog('system', '❌ Random trade failed', {
+                error: error.message,
                 timestamp: new Date().toISOString()
             });
             
@@ -379,10 +406,10 @@ class MXTKMarketMaker {
                 const usdtBalance = await this.usdtContract.balanceOf(this.masterWallet.address);
                 const mxtkBalance = await this.mxtkContract.balanceOf(this.masterWallet.address);
                 
-                console.error('Wallet state at error:', {
-                    ethBalance: ethers.utils.formatEther(ethBalance),
-                    usdtBalance: ethers.utils.formatUnits(usdtBalance, 6),
-                    mxtkBalance: ethers.utils.formatEther(mxtkBalance)
+                this.tradingLog('balance', 'Wallet state at error', {
+                    ETH: ethers.utils.formatEther(ethBalance),
+                    USDT: ethers.utils.formatUnits(usdtBalance, 6),
+                    MXTK: ethers.utils.formatEther(mxtkBalance)
                 });
             } catch (balanceError) {
                 console.error('Failed to get balances during error handling:', balanceError);
@@ -394,62 +421,122 @@ class MXTKMarketMaker {
 
     initializeWebSocket() {
         try {
+            // Track important trading metrics
+            let lastGasPrice = null;
+            let lastLoggedBlock = 0;
+            let significantGasChange = false;
+
             // Setup WebSocket connection for real-time monitoring
             this.provider.on('pending', async (txHash) => {
                 try {
                     const tx = await this.provider.getTransaction(txHash);
-                    if (tx && tx.to === this.UNISWAP_V3_ROUTER) {
-                        console.log(`Monitoring pending transaction: ${txHash}`);
+                    // Only monitor our own transactions or Uniswap router transactions
+                    if (tx && (
+                        tx.from.toLowerCase() === this.masterWallet.address.toLowerCase() ||
+                        tx.to === this.UNISWAP_V3_ROUTER
+                    )) {
+                        console.log(`🔍 Monitoring transaction: ${txHash.slice(0, 10)}...`);
                     }
                 } catch (error) {
                     console.error('Error monitoring transaction:', error);
                 }
             });
 
-            // Listen for new blocks with proper gas price handling
+            // Enhanced block monitoring
             this.provider.on('block', async (blockNumber) => {
                 try {
-                    const block = await this.provider.getBlock(blockNumber);
-                    // Get current fee data instead of using block.gasPrice
                     const feeData = await this.provider.getFeeData();
-                    
-                    console.log('New block:', {
-                        number: blockNumber,
-                        baseFeePerGas: feeData.lastBaseFeePerGas ? 
-                            ethers.utils.formatUnits(feeData.lastBaseFeePerGas, 'gwei') : 'N/A',
-                        maxFeePerGas: feeData.maxFeePerGas ?
-                            ethers.utils.formatUnits(feeData.maxFeePerGas, 'gwei') : 'N/A',
-                        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ?
-                            ethers.utils.formatUnits(feeData.maxPriorityFeePerGas, 'gwei') : 'N/A'
-                    });
+                    const currentGasPrice = feeData.lastBaseFeePerGas;
+
+                    // Check for significant gas price changes (>20%)
+                    if (lastGasPrice && currentGasPrice) {
+                        const change = Math.abs(currentGasPrice.sub(lastGasPrice))
+                            .mul(100)
+                            .div(lastGasPrice);
+                        significantGasChange = change.gt(20); // 20% threshold
+                    }
+
+                    // Log on significant events or every 100 blocks
+                    if (significantGasChange || blockNumber - lastLoggedBlock >= 100) {
+                        console.log('📊 Network Status:', {
+                            block: blockNumber,
+                            gas: {
+                                base: feeData.lastBaseFeePerGas ? 
+                                    `${ethers.utils.formatUnits(feeData.lastBaseFeePerGas, 'gwei')} gwei` : 'N/A',
+                                max: feeData.maxFeePerGas ?
+                                    `${ethers.utils.formatUnits(feeData.maxFeePerGas, 'gwei')} gwei` : 'N/A'
+                            },
+                            ...(significantGasChange && {
+                                alert: '⚠️ Significant gas price change detected'
+                            })
+                        });
+
+                        lastLoggedBlock = blockNumber;
+                        lastGasPrice = currentGasPrice;
+                        significantGasChange = false;
+                    }
                 } catch (error) {
-                    // Log error but don't let it crash the application
-                    console.error('Error monitoring block:', {
+                    console.error('Block monitoring error:', {
                         blockNumber,
                         error: error.message
                     });
                 }
             });
 
+            // Add error event handler
+            this.provider.on('error', (error) => {
+                console.error('🚨 WebSocket connection error:', error);
+                // Attempt to reconnect
+                setTimeout(() => {
+                    console.log('Attempting to reconnect WebSocket...');
+                    this.initializeWebSocket();
+                }, 5000);
+            });
+
             console.log('✅ WebSocket monitoring initialized');
         } catch (error) {
             console.error('Error initializing WebSocket:', error);
-            // Don't throw the error as WebSocket monitoring is not critical
         }
     }
 
     setupLogging() {
-        // Setup logging with timestamps
         const originalLog = console.log;
+        const originalError = console.error;
+        const originalWarn = console.warn;
+
+        // Enhanced logging with categories and emojis
         console.log = (...args) => {
             const timestamp = new Date().toISOString();
-            originalLog.apply(console, [`[${timestamp}]`, ...args]);
+            originalLog.apply(console, [`[${timestamp}] 📝`, ...args]);
+        };
+
+        console.error = (...args) => {
+            const timestamp = new Date().toISOString();
+            originalError.apply(console, [`[${timestamp}] ❌`, ...args]);
+        };
+
+        console.warn = (...args) => {
+            const timestamp = new Date().toISOString();
+            originalWarn.apply(console, [`[${timestamp}] ⚠️`, ...args]);
+        };
+
+        // Add custom trading logger
+        this.tradingLog = (type, message, data = {}) => {
+            const icons = {
+                trade: '💱',
+                balance: '💰',
+                gas: '⛽',
+                system: '🔧'
+            };
+            console.log(`${icons[type] || '📝'} [${type.toUpperCase()}] ${message}`, data);
         };
     }
 
     async start() {
         try {
             await this.initialize();
+            
+            this.tradingLog('system', 'Starting trading loop...');
             
             // Main trading loop
             while (true) {
@@ -460,16 +547,25 @@ class MXTKMarketMaker {
                     // Execute random trade
                     const delay = await this.performRandomTrade();
 
+                    this.tradingLog('system', 'Waiting for next trade', {
+                        delay: `${delay} seconds`
+                    });
+
                     // Wait for random delay before next trade
                     await new Promise(resolve => setTimeout(resolve, delay * 1000));
                 } catch (error) {
-                    console.error('Error in trading loop:', error);
+                    this.tradingLog('system', '❌ Error in trading loop', {
+                        error: error.message
+                    });
                     // Wait 1 minute before retrying
                     await new Promise(resolve => setTimeout(resolve, 60000));
                 }
             }
         } catch (error) {
-            console.error('Fatal error in market maker:', error);
+            this.tradingLog('system', '❌ Fatal error in market maker', {
+                error: error.message,
+                stack: error.stack
+            });
             throw error;
         }
     }
