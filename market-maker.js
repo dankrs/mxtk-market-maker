@@ -293,19 +293,23 @@ class MXTKMarketMaker {
         try {
             console.log('\n=== Starting Random Trade ===');
             
-            // Log current state
-            console.log('Current state:', {
-                isFirstTrade: this.isFirstTrade,
-                lastTradeDirection: this.lastTradeDirection
+            // Get current balances
+            const usdtBalance = await this.usdtContract.balanceOf(this.masterWallet.address);
+            const mxtkBalance = await this.mxtkContract.balanceOf(this.masterWallet.address);
+            
+            console.log('Current balances:', {
+                USDT: ethers.utils.formatUnits(usdtBalance, 6),
+                MXTK: ethers.utils.formatEther(mxtkBalance)
             });
 
             // Determine trade direction
-            let tokenIn, tokenOut, tradeDirection;
+            let tokenIn, tokenOut, tradeDirection, availableBalance;
             if (this.isFirstTrade) {
                 // First trade is always USDT → MXTK
                 tokenIn = this.USDT_ADDRESS;
                 tokenOut = this.MXTK_ADDRESS;
                 tradeDirection = 'USDT_TO_MXTK';
+                availableBalance = usdtBalance;
                 console.log('Executing first trade: USDT → MXTK');
                 this.isFirstTrade = false;
             } else {
@@ -314,14 +318,28 @@ class MXTKMarketMaker {
                 tokenIn = isUsdtToMxtk ? this.USDT_ADDRESS : this.MXTK_ADDRESS;
                 tokenOut = isUsdtToMxtk ? this.MXTK_ADDRESS : this.USDT_ADDRESS;
                 tradeDirection = isUsdtToMxtk ? 'USDT_TO_MXTK' : 'MXTK_TO_USDT';
+                availableBalance = isUsdtToMxtk ? usdtBalance : mxtkBalance;
                 console.log(`Random trade direction selected: ${tradeDirection}`);
             }
 
-            // Generate random trade amount
+            // Calculate maximum possible trade amount based on balance
+            const decimals = tokenIn === this.USDT_ADDRESS ? 6 : 18;
             const minAmount = this.MIN_TRADE_AMOUNT;
-            const maxAmount = this.MAX_TRADE_AMOUNT;
+            const maxAmount = ethers.BigNumber.from(this.MAX_TRADE_AMOUNT);
+            
+            // Ensure we don't exceed available balance
+            const maxPossibleAmount = availableBalance.lt(maxAmount) ? availableBalance : maxAmount;
+
+            // Check if we have enough balance for minimum trade
+            if (maxPossibleAmount.lt(minAmount)) {
+                throw new Error(`Insufficient ${tokenIn === this.USDT_ADDRESS ? 'USDT' : 'MXTK'} balance for minimum trade. ` +
+                    `Need: ${ethers.utils.formatUnits(minAmount, decimals)}, ` +
+                    `Have: ${ethers.utils.formatUnits(availableBalance, decimals)}`);
+            }
+
+            // Generate random amount within available balance
             const randomAmount = minAmount.add(
-                maxAmount.sub(minAmount)
+                maxPossibleAmount.sub(minAmount)
                     .mul(Math.floor(Math.random() * 1000))
                     .div(1000)
             );
@@ -330,7 +348,9 @@ class MXTKMarketMaker {
                 direction: tradeDirection,
                 tokenIn: tokenIn === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
                 tokenOut: tokenOut === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
-                amount: ethers.utils.formatUnits(randomAmount, tokenIn === this.USDT_ADDRESS ? 6 : 18)
+                availableBalance: ethers.utils.formatUnits(availableBalance, decimals),
+                maxPossible: ethers.utils.formatUnits(maxPossibleAmount, decimals),
+                selectedAmount: ethers.utils.formatUnits(randomAmount, decimals)
             });
 
             // Execute the swap
