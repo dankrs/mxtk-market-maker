@@ -31,39 +31,60 @@ class MXTKMarketMaker {
         // Now we can use this.tradingLog
         this.tradingLog('system', 'Initializing market maker...');
         
-        // Validate MXTK address case
-        const correctMXTKAddress = "0x3e4Ffeb394B371AAaa0998488046Ca19d870d9Ba";
-        if (process.env.MXTK_ADDRESS !== correctMXTKAddress) {
-            throw new Error(`MXTK address case mismatch. Expected: ${correctMXTKAddress}, Got: ${process.env.MXTK_ADDRESS}`);
+        // Validate MXTK address format
+        if (!process.env.MXTK_ADDRESS) {
+            throw new Error('MXTK_ADDRESS not found in environment variables');
+        }
+        try {
+            this.MXTK_ADDRESS = ethers.utils.getAddress(process.env.MXTK_ADDRESS);
+            this.tradingLog('system', '✅ MXTK address validated', { address: this.MXTK_ADDRESS });
+        } catch (error) {
+            throw new Error(`Invalid MXTK address format: ${process.env.MXTK_ADDRESS}`);
         }
 
-        // Validate USDT address case
-        const correctUSDTAddress = "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9";
-        if (process.env.USDT_ADDRESS !== correctUSDTAddress) {
-            throw new Error(`USDT address case mismatch. Expected: ${correctUSDTAddress}, Got: ${process.env.USDT_ADDRESS}`);
+        // Validate USDT address format
+        if (!process.env.USDT_ADDRESS) {
+            throw new Error('USDT_ADDRESS not found in environment variables');
+        }
+        try {
+            this.USDT_ADDRESS = ethers.utils.getAddress(process.env.USDT_ADDRESS);
+            this.tradingLog('system', '✅ USDT address validated', { address: this.USDT_ADDRESS });
+        } catch (error) {
+            throw new Error(`Invalid USDT address format: ${process.env.USDT_ADDRESS}`);
         }
         
-        // Validate Uniswap V3 addresses
-        const correctRouterAddress = "0xE592427A0AEce92De3Edee1F18E0157C05861564";
-        const correctFactoryAddress = "0x1F98431c8aD98523631AE4a59f267346ea31F984";
-        const correctQuoterAddress = "0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6";
-
-        if (process.env.UNISWAP_V3_ROUTER !== correctRouterAddress) {
-            throw new Error(`Router address mismatch. Expected: ${correctRouterAddress}, Got: ${process.env.UNISWAP_V3_ROUTER}`);
+        // Validate Uniswap V3 Router address
+        if (!process.env.UNISWAP_V3_ROUTER) {
+            throw new Error('UNISWAP_V3_ROUTER not found in environment variables');
         }
-        if (process.env.UNISWAP_V3_FACTORY !== correctFactoryAddress) {
-            throw new Error(`Factory address mismatch. Expected: ${correctFactoryAddress}, Got: ${process.env.UNISWAP_V3_FACTORY}`);
-        }
-        if (process.env.UNISWAP_V3_QUOTER !== correctQuoterAddress) {
-            throw new Error(`Quoter address mismatch. Expected: ${correctQuoterAddress}, Got: ${process.env.UNISWAP_V3_QUOTER}`);
+        try {
+            this.UNISWAP_V3_ROUTER = ethers.utils.getAddress(process.env.UNISWAP_V3_ROUTER);
+            this.tradingLog('system', '✅ Uniswap V3 Router address validated', { address: this.UNISWAP_V3_ROUTER });
+        } catch (error) {
+            throw new Error(`Invalid Uniswap V3 Router address format: ${process.env.UNISWAP_V3_ROUTER}`);
         }
 
-        // Assign all validated addresses
-        this.UNISWAP_V3_ROUTER = correctRouterAddress;
-        this.UNISWAP_V3_FACTORY = correctFactoryAddress;
-        this.UNISWAP_V3_QUOTER = correctQuoterAddress;
-        this.MXTK_ADDRESS = correctMXTKAddress;
-        this.USDT_ADDRESS = correctUSDTAddress;
+        // Validate Uniswap V3 Factory address
+        if (!process.env.UNISWAP_V3_FACTORY) {
+            throw new Error('UNISWAP_V3_FACTORY not found in environment variables');
+        }
+        try {
+            this.UNISWAP_V3_FACTORY = ethers.utils.getAddress(process.env.UNISWAP_V3_FACTORY);
+            this.tradingLog('system', '✅ Uniswap V3 Factory address validated', { address: this.UNISWAP_V3_FACTORY });
+        } catch (error) {
+            throw new Error(`Invalid Uniswap V3 Factory address format: ${process.env.UNISWAP_V3_FACTORY}`);
+        }
+
+        // Validate Uniswap V3 Quoter address
+        if (!process.env.UNISWAP_V3_QUOTER) {
+            throw new Error('UNISWAP_V3_QUOTER not found in environment variables');
+        }
+        try {
+            this.UNISWAP_V3_QUOTER = ethers.utils.getAddress(process.env.UNISWAP_V3_QUOTER);
+            this.tradingLog('system', '✅ Uniswap V3 Quoter address validated', { address: this.UNISWAP_V3_QUOTER });
+        } catch (error) {
+            throw new Error(`Invalid Uniswap V3 Quoter address format: ${process.env.UNISWAP_V3_QUOTER}`);
+        }
 
         // Log contract addresses
         this.tradingLog('system', 'Contract addresses verified', {
@@ -251,7 +272,14 @@ class MXTKMarketMaker {
     async initializeContracts() {
         this.tradingLog('system', '=== Initializing contracts ===');
         
-        // Initialize MXTK contract
+        // Normalize addresses during initialization
+        this.MXTK_ADDRESS = await this.normalizeAddress(this.MXTK_ADDRESS);
+        this.USDT_ADDRESS = await this.normalizeAddress(this.USDT_ADDRESS);
+        this.UNISWAP_V3_ROUTER = await this.normalizeAddress(this.UNISWAP_V3_ROUTER);
+        this.UNISWAP_V3_FACTORY = await this.normalizeAddress(this.UNISWAP_V3_FACTORY);
+        this.UNISWAP_V3_QUOTER = await this.normalizeAddress(this.UNISWAP_V3_QUOTER);
+        
+        // Initialize contracts with normalized addresses
         this.mxtkContract = new ethers.Contract(
             this.MXTK_ADDRESS,
             [
@@ -263,7 +291,6 @@ class MXTKMarketMaker {
             this.masterWallet
         );
 
-        // Initialize USDT contract
         this.usdtContract = new ethers.Contract(
             this.USDT_ADDRESS,
             [
@@ -275,7 +302,6 @@ class MXTKMarketMaker {
             this.masterWallet
         );
 
-        // Initialize Uniswap contracts
         this.quoterContract = new ethers.Contract(
             this.UNISWAP_V3_QUOTER,
             [
@@ -285,7 +311,6 @@ class MXTKMarketMaker {
             this.provider
         );
 
-        // Initialize Router contract
         this.routerContract = new ethers.Contract(
             this.UNISWAP_V3_ROUTER,
             [
@@ -353,31 +378,48 @@ class MXTKMarketMaker {
         }
     }
 
+    async normalizeAddress(address) {
+        try {
+            // Use ethers.utils.getAddress to get checksummed address
+            return ethers.utils.getAddress(address);
+        } catch (error) {
+            this.tradingLog('system', '❌ Invalid address format', {
+                address,
+                error: error.message
+            });
+            throw new Error(`Invalid address format: ${address}`);
+        }
+    }
+
     async executeSwap(tokenIn, tokenOut, amountIn, isExactIn = true) {
         try {
             this.tradingLog('trade', '=== Starting Swap Execution ===');
             
+            // Normalize token addresses
+            const normalizedTokenIn = await this.normalizeAddress(tokenIn);
+            const normalizedTokenOut = await this.normalizeAddress(tokenOut);
+            
             // Log the pool we're using
             const fee = this.POOL_FEE;
             this.tradingLog('trade', 'Pool Details', {
-                tokenIn: tokenIn === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
-                tokenOut: tokenOut === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
+                tokenIn: normalizedTokenIn === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
+                tokenOut: normalizedTokenOut === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
                 fee: `${fee/10000}%`,
-                poolAddress: `${this.UNISWAP_V3_FACTORY}/${tokenIn}/${tokenOut}/${fee}`
+                poolAddress: `${this.UNISWAP_V3_FACTORY}/${normalizedTokenIn}/${normalizedTokenOut}/${fee}`
             });
 
             // Get quote first to verify pool exists and has liquidity
             try {
                 const quoteResult = await this.quoterContract.callStatic.quoteExactInputSingle(
-                    tokenIn,
-                    tokenOut,
+                    normalizedTokenIn,
+                    normalizedTokenOut,
                     fee,
                     amountIn,
                     0
                 );
                 this.tradingLog('trade', 'Quote received', {
-                    amountIn: ethers.utils.formatUnits(amountIn, tokenIn === this.USDT_ADDRESS ? 6 : 18),
-                    expectedOut: ethers.utils.formatUnits(quoteResult, tokenOut === this.USDT_ADDRESS ? 6 : 18)
+                    amountIn: ethers.utils.formatUnits(amountIn, normalizedTokenIn === this.USDT_ADDRESS ? 6 : 18),
+                    expectedOut: ethers.utils.formatUnits(quoteResult, normalizedTokenOut === this.USDT_ADDRESS ? 6 : 18)
                 });
             } catch (error) {
                 throw new Error(`Failed to get quote: ${error.message}. This might indicate no pool exists or has no liquidity for the selected fee tier.`);
@@ -397,9 +439,9 @@ class MXTKMarketMaker {
             // Get quote and estimate gas
             console.log('\n=== Estimating transaction parameters ===');
             const params = {
-                tokenIn,
-                tokenOut,
-                fee,
+                tokenIn: normalizedTokenIn,
+                tokenOut: normalizedTokenOut,
+                fee: fee,
                 recipient: this.masterWallet.address,
                 deadline,
                 amountIn,
@@ -424,8 +466,8 @@ class MXTKMarketMaker {
             // Get actual quote
             console.log('\n=== Getting Uniswap quote ===');
             const amountOut = await this.quoterContract.callStatic.quoteExactInputSingle(
-                tokenIn,
-                tokenOut,
+                normalizedTokenIn,
+                normalizedTokenOut,
                 fee,
                 amountIn,
                 0
@@ -435,8 +477,8 @@ class MXTKMarketMaker {
             const minAmountOut = amountOut.mul(10000 - this.SLIPPAGE_TOLERANCE).div(10000);
 
             this.tradingLog('trade', 'Slippage protection', {
-                expectedOutput: ethers.utils.formatUnits(amountOut, tokenOut === this.USDT_ADDRESS ? 6 : 18),
-                minimumOutput: ethers.utils.formatUnits(minAmountOut, tokenOut === this.USDT_ADDRESS ? 6 : 18),
+                expectedOutput: ethers.utils.formatUnits(amountOut, normalizedTokenOut === this.USDT_ADDRESS ? 6 : 18),
+                minimumOutput: ethers.utils.formatUnits(minAmountOut, normalizedTokenOut === this.USDT_ADDRESS ? 6 : 18),
                 slippagePercent: `${this.SLIPPAGE_TOLERANCE / 100}%`
             });
 
@@ -445,10 +487,10 @@ class MXTKMarketMaker {
 
             // Execute the swap with gas parameters
             console.log('\n=== Executing swap with parameters ===');
-            console.log('Token In:', tokenIn);
-            console.log('Token Out:', tokenOut);
-            console.log('Amount In:', ethers.utils.formatUnits(amountIn, tokenIn === this.USDT_ADDRESS ? 6 : 18));
-            console.log('Min Amount Out:', ethers.utils.formatUnits(minAmountOut, tokenOut === this.USDT_ADDRESS ? 6 : 18));
+            console.log('Token In:', normalizedTokenIn);
+            console.log('Token Out:', normalizedTokenOut);
+            console.log('Amount In:', ethers.utils.formatUnits(amountIn, normalizedTokenIn === this.USDT_ADDRESS ? 6 : 18));
+            console.log('Min Amount Out:', ethers.utils.formatUnits(minAmountOut, normalizedTokenOut === this.USDT_ADDRESS ? 6 : 18));
             console.log('Gas Limit:', gasEstimate.toString());
             console.log('Max Fee Per Gas:', ethers.utils.formatUnits(feeData.maxFeePerGas, 'gwei'), 'gwei');
             console.log('Max Priority Fee:', ethers.utils.formatUnits(feeData.maxPriorityFeePerGas, 'gwei'), 'gwei');
@@ -538,72 +580,110 @@ class MXTKMarketMaker {
 
     async verifyPool(tokenA, tokenB, fee) {
         try {
-            this.tradingLog('system', '=== Verifying Pool Status ===');
+            // Normalize addresses first
+            const normalizedTokenA = ethers.utils.getAddress(tokenA);
+            const normalizedTokenB = ethers.utils.getAddress(tokenB);
             
+            // Ensure tokens are in correct order (lower address first)
+            let token0, token1;
+            if (normalizedTokenA.toLowerCase() > normalizedTokenB.toLowerCase()) {
+                token0 = normalizedTokenB;
+                token1 = normalizedTokenA;
+            } else {
+                token0 = normalizedTokenA;
+                token1 = normalizedTokenB;
+            }
+            
+            this.tradingLog('system', 'Verifying pool with ordered tokens', {
+                token0: token0 === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
+                token1: token1 === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
+                fee: `${fee/10000}%`
+            });
+
+            // Get pool address from factory
             const factoryContract = new ethers.Contract(
                 this.UNISWAP_V3_FACTORY,
                 ['function getPool(address,address,uint24) external view returns (address)'],
                 this.provider
             );
             
-            // Get pool address
-            const poolAddress = await factoryContract.getPool(tokenA, tokenB, fee);
+            const poolAddress = await factoryContract.getPool(token0, token1, fee);
             
-            this.tradingLog('system', 'Pool lookup result', {
-                tokenA: tokenA === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
-                tokenB: tokenB === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
-                fee: `${fee/10000}%`,
-                poolAddress
-            });
-
-            if (poolAddress === '0x0000000000000000000000000000000000000000') {
-                throw new Error(`No pool exists for ${tokenA === this.USDT_ADDRESS ? 'USDT' : 'MXTK'}/${tokenB === this.USDT_ADDRESS ? 'USDT' : 'MXTK'} with fee ${fee/10000}%`);
+            // Check if pool exists
+            if (poolAddress === ethers.constants.AddressZero) {
+                throw new Error(`No pool exists for ${token0}/${token1} with fee ${fee/10000}%`);
             }
 
-            // Check pool liquidity
+            // Initialize pool contract to check its state
             const poolContract = new ethers.Contract(
                 poolAddress,
                 [
+                    'function token0() external view returns (address)',
+                    'function token1() external view returns (address)',
                     'function liquidity() external view returns (uint128)',
                     'function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)'
                 ],
                 this.provider
             );
-            
-            const [liquidity, slot0] = await Promise.all([
+
+            // Get pool data
+            const [actualToken0, actualToken1, liquidity, slot0] = await Promise.all([
+                poolContract.token0(),
+                poolContract.token1(),
                 poolContract.liquidity(),
                 poolContract.slot0()
             ]);
 
-            this.tradingLog('system', 'Pool liquidity status', {
-                poolAddress,
-                liquidity: liquidity.toString(),
-                currentPrice: slot0.sqrtPriceX96.toString(),
-                isActive: !liquidity.eq(0)
-            });
-            
-            if (liquidity.eq(0)) {
-                throw new Error(`⚠️ Pool ${poolAddress} exists but has ZERO liquidity!\n` +
-                              `Pair: ${tokenA === this.USDT_ADDRESS ? 'USDT' : 'MXTK'}/${tokenB === this.USDT_ADDRESS ? 'USDT' : 'MXTK'}\n` +
-                              `Fee tier: ${fee/10000}%`);
+            // Verify token ordering matches
+            if (actualToken0.toLowerCase() !== token0.toLowerCase() ||
+                actualToken1.toLowerCase() !== token1.toLowerCase()) {
+                throw new Error('Pool token ordering mismatch');
             }
 
+            // Check liquidity
+            if (liquidity.eq(0)) {
+                throw new Error(`Pool ${poolAddress} exists but has no liquidity`);
+            }
+
+            // Log pool verification success
             this.tradingLog('system', '✅ Pool verification successful', {
-                pair: `${tokenA === this.USDT_ADDRESS ? 'USDT' : 'MXTK'}/${tokenB === this.USDT_ADDRESS ? 'USDT' : 'MXTK'}`,
-                fee: `${fee/10000}%`,
-                liquidity: liquidity.toString()
+                poolAddress: ethers.utils.getAddress(poolAddress),
+                token0: token0 === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
+                token1: token1 === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
+                liquidity: liquidity.toString(),
+                sqrtPriceX96: slot0.sqrtPriceX96.toString(),
+                tick: slot0.tick.toString()
             });
 
-            return poolAddress;
+            return {
+                poolAddress: ethers.utils.getAddress(poolAddress),
+                token0,
+                token1,
+                liquidity: liquidity.toString(),
+                sqrtPriceX96: slot0.sqrtPriceX96.toString(),
+                tick: slot0.tick
+            };
+
         } catch (error) {
-            // Enhanced error logging
             this.tradingLog('system', '❌ Pool verification failed', {
-                error: error.message,
-                pair: `${tokenA === this.USDT_ADDRESS ? 'USDT' : 'MXTK'}/${tokenB === this.USDT_ADDRESS ? 'USDT' : 'MXTK'}`,
-                fee: `${fee/10000}%`
+                tokenA: normalizedTokenA,
+                tokenB: normalizedTokenB,
+                fee: `${fee/10000}%`,
+                error: error.message
             });
             
-            throw new Error(`Pool verification failed: ${error.message}`);
+            // Send email notification for pool verification failures
+            await this.sendErrorEmail('Pool Verification Failed', {
+                type: 'Pool Error',
+                message: error.message,
+                additional: {
+                    tokenA: normalizedTokenA === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
+                    tokenB: normalizedTokenB === this.USDT_ADDRESS ? 'USDT' : 'MXTK',
+                    fee: `${fee/10000}%`
+                }
+            });
+
+            throw error;
         }
     }
 
