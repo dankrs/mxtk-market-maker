@@ -1143,20 +1143,19 @@ class MXTKMarketMaker {
             const maxFeePerGas = feeData.maxFeePerGas || feeData.gasPrice;
             const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas || ethers.utils.parseUnits("0.1", "gwei");
 
-            // Calculate maximum gas cost
+            // Calculate costs for display only
             const maxGasCost = gasLimit.mul(maxFeePerGas);
-
-            // Add 20% safety buffer for potential gas price fluctuations
             const safetyBuffer = maxGasCost.mul(20).div(100);
             const totalRequired = maxGasCost.add(safetyBuffer);
 
+            // Return only the transaction parameters
             return {
                 gasLimit,
                 maxFeePerGas,
                 maxPriorityFeePerGas,
-                maxGasCost,
-                totalRequired,
-                type: 2 // EIP-1559
+                type: 2, // EIP-1559
+                _maxGasCost: maxGasCost,        // For display purposes only
+                _totalRequired: totalRequired    // For display purposes only
             };
         } catch (error) {
             console.error('Error calculating gas costs:', error);
@@ -1173,18 +1172,24 @@ class MXTKMarketMaker {
             console.log('Gas limit:', gasCosts.gasLimit.toString());
             console.log('Max fee per gas:', ethers.utils.formatUnits(gasCosts.maxFeePerGas, 'gwei'), 'gwei');
             console.log('Max priority fee:', ethers.utils.formatUnits(gasCosts.maxPriorityFeePerGas, 'gwei'), 'gwei');
-            console.log('Maximum gas cost:', ethers.utils.formatEther(gasCosts.maxGasCost), 'ETH');
-            console.log('Total required (with buffer):', ethers.utils.formatEther(gasCosts.totalRequired), 'ETH');
+            console.log('Maximum gas cost:', ethers.utils.formatEther(gasCosts._maxGasCost), 'ETH');
+            console.log('Total required (with buffer):', ethers.utils.formatEther(gasCosts._totalRequired), 'ETH');
             console.log('Available balance:', ethers.utils.formatEther(balance), 'ETH');
 
-            if (balance.lt(gasCosts.totalRequired)) {
+            if (balance.lt(gasCosts._totalRequired)) {
                 console.log('⚠️ Insufficient ETH for safe transaction:');
-                console.log('Required (with buffer):', ethers.utils.formatEther(gasCosts.totalRequired), 'ETH');
+                console.log('Required (with buffer):', ethers.utils.formatEther(gasCosts._totalRequired), 'ETH');
                 console.log('Available:', ethers.utils.formatEther(balance), 'ETH');
                 return false;
             }
 
-            return gasCosts;
+            // Return only valid transaction parameters
+            return {
+                gasLimit: gasCosts.gasLimit,
+                maxFeePerGas: gasCosts.maxFeePerGas,
+                maxPriorityFeePerGas: gasCosts.maxPriorityFeePerGas,
+                type: 2
+            };
         } catch (error) {
             console.error('Error checking gas sufficiency:', error);
             throw error;
