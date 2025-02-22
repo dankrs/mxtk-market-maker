@@ -1114,38 +1114,50 @@ class MXTKMarketMaker {
         console.log('=====================\n');
     }
 
-    async calculateGasCosts(estimatedGas) {
+    async calculateGasCosts(estimatedGas, wallet, txData) {
         try {
-            // Get current fee data
+            // Get current fee data from network
             const feeData = await this.provider.getFeeData();
             
-            // For Arbitrum, use minimal gas adjustments
-            const gasLimit = estimatedGas.mul(105).div(100); // Reduce buffer to 5%
-            const maxFeePerGas = feeData.maxFeePerGas || feeData.gasPrice;
-            const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas || ethers.utils.parseUnits("0.1", "gwei");
+            // Create a transaction object for estimation
+            const transactionRequest = {
+                from: wallet.address,
+                to: txData.to,
+                data: txData.data,
+                value: txData.value || 0,
+                type: 2 // EIP-1559
+            };
 
-            // Calculate costs for display only
-            const maxGasCost = gasLimit.mul(maxFeePerGas);
-            // Reduce safety buffer to 2% for Arbitrum
-            const safetyBuffer = maxGasCost.mul(2).div(100);
+            // Get actual gas estimate from the network
+            const gasEstimate = await this.provider.estimateGas(transactionRequest);
+            console.log('\nGas Estimation Details:');
+            console.log('Network gas estimate:', gasEstimate.toString());
+
+            // Use network provided values
+            const maxFeePerGas = feeData.maxFeePerGas;
+            const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
+
+            // Calculate actual cost
+            const maxGasCost = gasEstimate.mul(maxFeePerGas);
+            
+            // Add minimal safety buffer (1%)
+            const safetyBuffer = maxGasCost.mul(1).div(100);
             const totalRequired = maxGasCost.add(safetyBuffer);
 
-            // Log detailed calculation
             console.log('\nDetailed Gas Calculation:');
-            console.log('Base gas estimate:', estimatedGas.toString());
-            console.log('Adjusted gas limit (+5%):', gasLimit.toString());
-            console.log('Max fee per gas (wei):', maxFeePerGas.toString());
-            console.log('Base cost (wei):', maxGasCost.toString());
-            console.log('Safety buffer (2%):', ethers.utils.formatEther(safetyBuffer), 'ETH');
+            console.log('Network gas estimate:', gasEstimate.toString());
+            console.log('Max fee per gas:', ethers.utils.formatUnits(maxFeePerGas, 'gwei'), 'gwei');
+            console.log('Max priority fee:', ethers.utils.formatUnits(maxPriorityFeePerGas, 'gwei'), 'gwei');
+            console.log('Base cost:', ethers.utils.formatEther(maxGasCost), 'ETH');
+            console.log('Safety buffer (1%):', ethers.utils.formatEther(safetyBuffer), 'ETH');
 
-            // Return only the transaction parameters
             return {
-                gasLimit,
+                gasLimit: gasEstimate,
                 maxFeePerGas,
                 maxPriorityFeePerGas,
-                type: 2, // EIP-1559
-                _maxGasCost: maxGasCost,        // For display purposes only
-                _totalRequired: totalRequired    // For display purposes only
+                type: 2,
+                _maxGasCost: maxGasCost,
+                _totalRequired: totalRequired
             };
         } catch (error) {
             console.error('Error calculating gas costs:', error);
@@ -1156,7 +1168,7 @@ class MXTKMarketMaker {
     async checkSufficientGas(wallet, estimatedGas) {
         try {
             const balance = await wallet.getBalance();
-            const gasCosts = await this.calculateGasCosts(estimatedGas);
+            const gasCosts = await this.calculateGasCosts(estimatedGas, wallet, null);
 
             console.log('\nGas Calculation Details:');
             console.log('Gas limit:', gasCosts.gasLimit.toString());
@@ -1206,22 +1218,36 @@ class MXTKMarketMaker {
             if (mxtkAllowance.eq(0)) {
                 console.log('Approving MXTK...');
                 try {
-                    // Estimate gas for approval
-                    const estimatedGas = await mxtkWithSigner.estimateGas.approve(
-                        this.UNISWAP_V3_ROUTER,
-                        MAX_UINT256
-                    );
+                    // Create transaction data for gas estimation
+                    const txData = {
+                        to: this.MXTK_ADDRESS,
+                        data: mxtkWithSigner.interface.encodeFunctionData('approve', [
+                            this.UNISWAP_V3_ROUTER,
+                            MAX_UINT256
+                        ])
+                    };
 
-                    // Check if we have enough gas and get gas parameters
-                    const gasCosts = await this.checkSufficientGas(wallet, estimatedGas);
-                    if (!gasCosts) {
+                    // Get gas parameters with real network estimation
+                    const gasCosts = await this.calculateGasCosts(null, wallet, txData);
+                    const balance = await wallet.getBalance();
+
+                    if (balance.lt(gasCosts._totalRequired)) {
+                        console.log('\n⚠️ Insufficient ETH for safe transaction:');
+                        console.log('Required (with buffer):', ethers.utils.formatEther(gasCosts._totalRequired), 'ETH');
+                        console.log('Available:', ethers.utils.formatEther(balance), 'ETH');
+                        console.log('Missing:', ethers.utils.formatEther(gasCosts._totalRequired.sub(balance)), 'ETH');
                         throw new Error('Insufficient ETH for MXTK approval');
                     }
 
                     const mxtkApproveTx = await mxtkWithSigner.approve(
                         this.UNISWAP_V3_ROUTER,
                         MAX_UINT256,
-                        gasCosts
+                        {
+                            gasLimit: gasCosts.gasLimit,
+                            maxFeePerGas: gasCosts.maxFeePerGas,
+                            maxPriorityFeePerGas: gasCosts.maxPriorityFeePerGas,
+                            type: 2
+                        }
                     );
                     
                     console.log('Waiting for MXTK approval transaction...');
@@ -1239,22 +1265,36 @@ class MXTKMarketMaker {
             if (usdtAllowance.eq(0)) {
                 console.log('Approving USDT...');
                 try {
-                    // Estimate gas for approval
-                    const estimatedGas = await usdtWithSigner.estimateGas.approve(
-                        this.UNISWAP_V3_ROUTER,
-                        MAX_UINT256
-                    );
+                    // Create transaction data for gas estimation
+                    const txData = {
+                        to: this.USDT_ADDRESS,
+                        data: usdtWithSigner.interface.encodeFunctionData('approve', [
+                            this.UNISWAP_V3_ROUTER,
+                            MAX_UINT256
+                        ])
+                    };
 
-                    // Check if we have enough gas and get gas parameters
-                    const gasCosts = await this.checkSufficientGas(wallet, estimatedGas);
-                    if (!gasCosts) {
+                    // Get gas parameters with real network estimation
+                    const gasCosts = await this.calculateGasCosts(null, wallet, txData);
+                    const balance = await wallet.getBalance();
+
+                    if (balance.lt(gasCosts._totalRequired)) {
+                        console.log('\n⚠️ Insufficient ETH for safe transaction:');
+                        console.log('Required (with buffer):', ethers.utils.formatEther(gasCosts._totalRequired), 'ETH');
+                        console.log('Available:', ethers.utils.formatEther(balance), 'ETH');
+                        console.log('Missing:', ethers.utils.formatEther(gasCosts._totalRequired.sub(balance)), 'ETH');
                         throw new Error('Insufficient ETH for USDT approval');
                     }
 
                     const usdtApproveTx = await usdtWithSigner.approve(
                         this.UNISWAP_V3_ROUTER,
                         MAX_UINT256,
-                        gasCosts
+                        {
+                            gasLimit: gasCosts.gasLimit,
+                            maxFeePerGas: gasCosts.maxFeePerGas,
+                            maxPriorityFeePerGas: gasCosts.maxPriorityFeePerGas,
+                            type: 2
+                        }
                     );
 
                     console.log('Waiting for USDT approval transaction...');
