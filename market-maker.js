@@ -25,12 +25,24 @@ class MXTKMarketMaker {
         this.config = config;
         this.provider = new ethers.providers.JsonRpcProvider(process.env.ARBITRUM_MAINNET_RPC);
         
+        // Validate MXTK address case
+        const correctMXTKAddress = "0x3e4Ffeb394B371AAaa0998488046Ca19d870d9Ba";
+        if (process.env.MXTK_ADDRESS !== correctMXTKAddress) {
+            throw new Error(`MXTK address case mismatch. Expected: ${correctMXTKAddress}, Got: ${process.env.MXTK_ADDRESS}`);
+        }
+
+        // Validate USDT address case
+        const correctUSDTAddress = "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9";
+        if (process.env.USDT_ADDRESS !== correctUSDTAddress) {
+            throw new Error(`USDT address case mismatch. Expected: ${correctUSDTAddress}, Got: ${process.env.USDT_ADDRESS}`);
+        }
+        
         // Contract addresses
         this.UNISWAP_V3_ROUTER = process.env.UNISWAP_V3_ROUTER;
         this.UNISWAP_V3_FACTORY = process.env.UNISWAP_V3_FACTORY;
         this.UNISWAP_V3_QUOTER = process.env.UNISWAP_V3_QUOTER;
-        this.MXTK_ADDRESS = process.env.MXTK_ADDRESS;
-        this.USDT_ADDRESS = process.env.USDT_ADDRESS;
+        this.MXTK_ADDRESS = correctMXTKAddress;  // Use the correct case
+        this.USDT_ADDRESS = correctUSDTAddress;  // Use the correct case
 
         // Trading parameters
         this.MIN_TRADE_AMOUNT = ethers.utils.parseUnits('0.1', 6);  // 0.1 USDT
@@ -49,7 +61,7 @@ class MXTKMarketMaker {
 
     async initialize() {
         try {
-            this.tradingLog('system', 'Initializing MXTK Market Maker...');
+            this.tradingLog('system', '=== Initializing MXTK Market Maker ===');
 
             // Initialize master wallet
             this.masterWallet = new ethers.Wallet(process.env.MASTER_WALLET_PRIVATE_KEY, this.provider);
@@ -63,7 +75,7 @@ class MXTKMarketMaker {
             // Check balances and approvals
             await this.checkBalancesAndApprovals();
 
-            this.tradingLog('system', '✅ Initialization complete');
+            this.tradingLog('system', '=== Initialization Complete ===');
         } catch (error) {
             this.tradingLog('system', '❌ Initialization failed', {
                 error: error.message
@@ -73,7 +85,7 @@ class MXTKMarketMaker {
     }
 
     async initializeContracts() {
-        this.tradingLog('system', 'Initializing contracts...');
+        this.tradingLog('system', '=== Initializing contracts ===');
         
         // Initialize MXTK contract
         this.mxtkContract = new ethers.Contract(
@@ -122,7 +134,7 @@ class MXTKMarketMaker {
     }
 
     async checkBalancesAndApprovals() {
-        this.tradingLog('system', 'Checking balances and approvals...');
+        this.tradingLog('system', '=== Checking balances and approvals ===');
 
         // Check ETH balance
         const ethBalance = await this.masterWallet.getBalance();
@@ -179,7 +191,7 @@ class MXTKMarketMaker {
 
     async executeSwap(tokenIn, tokenOut, amountIn, isExactIn = true) {
         try {
-            this.tradingLog('trade', 'Starting Swap Execution');
+            this.tradingLog('trade', '=== Starting Swap Execution ===');
             
             // Log the pool we're using
             const fee = parseInt(process.env.UNISWAP_POOL_FEE);
@@ -219,7 +231,7 @@ class MXTKMarketMaker {
             const deadline = Math.floor(Date.now() / 1000) + 60 * 20;
 
             // Get quote and estimate gas
-            console.log('\nEstimating transaction parameters...');
+            console.log('\n=== Estimating transaction parameters ===');
             const params = {
                 tokenIn,
                 tokenOut,
@@ -246,7 +258,7 @@ class MXTKMarketMaker {
             }
 
             // Get actual quote
-            console.log('\nGetting Uniswap quote...');
+            console.log('\n=== Getting Uniswap quote ===');
             const amountOut = await this.quoterContract.callStatic.quoteExactInputSingle(
                 tokenIn,
                 tokenOut,
@@ -262,7 +274,7 @@ class MXTKMarketMaker {
             params.amountOutMinimum = minAmountOut;
 
             // Execute the swap with gas parameters
-            console.log('\nExecuting swap with parameters:');
+            console.log('\n=== Executing swap with parameters ===');
             console.log('Token In:', tokenIn);
             console.log('Token Out:', tokenOut);
             console.log('Amount In:', ethers.utils.formatUnits(amountIn, tokenIn === this.USDT_ADDRESS ? 6 : 18));
@@ -300,7 +312,7 @@ class MXTKMarketMaker {
                 change: `${ethers.utils.formatEther(balanceAfter.sub(ethBalance))} ETH`
             });
 
-            this.tradingLog('trade', 'Swap Execution Complete');
+            this.tradingLog('trade', '=== Swap Execution Complete ===');
             return receipt;
         } catch (error) {
             this.tradingLog('trade', '❌ Swap execution failed', {
@@ -375,7 +387,7 @@ class MXTKMarketMaker {
 
     async performRandomTrade() {
         try {
-            this.tradingLog('system', 'Starting Random Trade');
+            this.tradingLog('system', '=== Starting Random Trade ===');
             
             // Get current balances
             const usdtBalance = await this.usdtContract.balanceOf(this.masterWallet.address);
@@ -457,7 +469,7 @@ class MXTKMarketMaker {
             const delay = Math.floor(Math.random() * (this.MAX_DELAY - this.MIN_DELAY + 1) + this.MIN_DELAY);
             this.tradingLog('system', `Next trade scheduled`, { delay: `${delay} seconds` });
 
-            this.tradingLog('system', 'Random Trade Complete');
+            this.tradingLog('system', '=== Random Trade Complete ===');
             return delay;
         } catch (error) {
             this.tradingLog('system', '❌ Random trade failed', {
@@ -505,7 +517,7 @@ class MXTKMarketMaker {
         // Add custom trading logger without timestamps
         this.tradingLog = (type, message, data = {}) => {
             const icons = {
-                trade: '💱',
+                trade: message.includes('Complete') || message.includes('confirmed') ? '✅' : '💱',
                 balance: '💰',
                 gas: '⛽',
                 system: '🔧'
@@ -518,7 +530,7 @@ class MXTKMarketMaker {
         try {
             await this.initialize();
             
-            this.tradingLog('system', 'Starting trading loop...');
+            this.tradingLog('system', '=== Starting trading loop ===');
             
             // Main trading loop
             while (true) {
