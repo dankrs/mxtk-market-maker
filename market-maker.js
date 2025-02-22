@@ -1155,16 +1155,52 @@ class MXTKMarketMaker {
                 this.UNISWAP_V3_ROUTER
             );
 
+            // Get current gas price with safety margin
+            const feeData = await this.provider.getFeeData();
+            const maxFeePerGas = feeData.maxFeePerGas.mul(120).div(100); // 20% safety margin
+            const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas.mul(120).div(100);
+
             // Approve MXTK if needed
             if (mxtkAllowance.eq(0)) {
                 console.log('Approving MXTK...');
-                const mxtkApproveTx = await mxtkWithSigner.approve(
-                    this.UNISWAP_V3_ROUTER,
-                    MAX_UINT256,
-                    { gasLimit: 100000 }
-                );
-                await mxtkApproveTx.wait();
-                console.log('✅ MXTK approved');
+                try {
+                    // First estimate gas
+                    const gasEstimate = await mxtkWithSigner.estimateGas.approve(
+                        this.UNISWAP_V3_ROUTER,
+                        MAX_UINT256
+                    );
+
+                    // Add 30% safety margin to gas estimate for Arbitrum
+                    const safeGasLimit = gasEstimate.mul(130).div(100);
+
+                    const mxtkApproveTx = await mxtkWithSigner.approve(
+                        this.UNISWAP_V3_ROUTER,
+                        MAX_UINT256,
+                        {
+                            gasLimit: safeGasLimit,
+                            maxFeePerGas,
+                            maxPriorityFeePerGas,
+                            type: 2 // EIP-1559 transaction
+                        }
+                    );
+                    await mxtkApproveTx.wait();
+                    console.log('✅ MXTK approved');
+                } catch (error) {
+                    console.error('Failed to approve MXTK:', error);
+                    // Try again with higher fixed gas limit
+                    const mxtkApproveTx = await mxtkWithSigner.approve(
+                        this.UNISWAP_V3_ROUTER,
+                        MAX_UINT256,
+                        {
+                            gasLimit: 500000, // Higher fixed gas limit
+                            maxFeePerGas,
+                            maxPriorityFeePerGas,
+                            type: 2
+                        }
+                    );
+                    await mxtkApproveTx.wait();
+                    console.log('✅ MXTK approved with higher gas limit');
+                }
             } else {
                 console.log('MXTK already approved');
             }
@@ -1172,13 +1208,44 @@ class MXTKMarketMaker {
             // Approve USDT if needed
             if (usdtAllowance.eq(0)) {
                 console.log('Approving USDT...');
-                const usdtApproveTx = await usdtWithSigner.approve(
-                    this.UNISWAP_V3_ROUTER,
-                    MAX_UINT256,
-                    { gasLimit: 100000 }
-                );
-                await usdtApproveTx.wait();
-                console.log('✅ USDT approved');
+                try {
+                    // First estimate gas
+                    const gasEstimate = await usdtWithSigner.estimateGas.approve(
+                        this.UNISWAP_V3_ROUTER,
+                        MAX_UINT256
+                    );
+
+                    // Add 30% safety margin to gas estimate for Arbitrum
+                    const safeGasLimit = gasEstimate.mul(130).div(100);
+
+                    const usdtApproveTx = await usdtWithSigner.approve(
+                        this.UNISWAP_V3_ROUTER,
+                        MAX_UINT256,
+                        {
+                            gasLimit: safeGasLimit,
+                            maxFeePerGas,
+                            maxPriorityFeePerGas,
+                            type: 2 // EIP-1559 transaction
+                        }
+                    );
+                    await usdtApproveTx.wait();
+                    console.log('✅ USDT approved');
+                } catch (error) {
+                    console.error('Failed to approve USDT:', error);
+                    // Try again with higher fixed gas limit
+                    const usdtApproveTx = await usdtWithSigner.approve(
+                        this.UNISWAP_V3_ROUTER,
+                        MAX_UINT256,
+                        {
+                            gasLimit: 500000, // Higher fixed gas limit
+                            maxFeePerGas,
+                            maxPriorityFeePerGas,
+                            type: 2
+                        }
+                    );
+                    await usdtApproveTx.wait();
+                    console.log('✅ USDT approved with higher gas limit');
+                }
             } else {
                 console.log('USDT already approved');
             }
