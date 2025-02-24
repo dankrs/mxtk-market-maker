@@ -8,7 +8,7 @@ A professional market making bot designed for the MXTK token on Arbitrum, using 
   - First trade is always USDT → MXTK
   - Subsequent trades alternate randomly between USDT → MXTK and MXTK → USDT
   - Random trade amounts within configured ranges
-  - Configurable delays between trades (30-300 seconds)
+  - Configurable delays between trades (30-600 seconds)
 
 - **Token Management**:
   - MXTK (18 decimals) and USDT (6 decimals) support
@@ -43,12 +43,16 @@ A professional market making bot designed for the MXTK token on Arbitrum, using 
 ## Trading Parameters
 
 - **USDT Trading Range**:
-  - Minimum: 0.1 USDT
-  - Maximum: 1.0 USDT
+  - Minimum: 0.01 USDT
+  - Maximum: 0.5 USDT
+
+- **MXTK Trading Range**:
+  - Minimum: 0.0001 MXTK
+  - Maximum: 0.002 MXTK
 
 - **Time Delays**:
   - Minimum: 30 seconds
-  - Maximum: 300 seconds
+  - Maximum: 600 seconds
 
 - **Slippage Settings**:
   - Maximum slippage: 2%
@@ -65,29 +69,33 @@ ARBITRUM_MAINNET_RPC=https://arb1.arbitrum.io/rpc
 ARBITRUM_TESTNET_RPC=https://sepolia-rollup.arbitrum.io/rpc
 
 # Trading Parameters
-MAX_DAILY_VOLUME=1
-CIRCUIT_BREAKER_THRESHOLD=0.1
-LOW_BALANCE_THRESHOLD=0.0002
-VOLUME_ALERT_THRESHOLD=0.8
+# MAX_DAILY_VOLUME=1                       # Maximum trading volume per day
+# CIRCUIT_BREAKER_THRESHOLD=0.1            # 10% price movement triggers halt
+# LOW_BALANCE_THRESHOLD=0.0002             # ETH balance warning threshold
+# VOLUME_ALERT_THRESHOLD=0.8               # Alert at 80% of max daily volume
 
 # Trading Ranges
-MIN_TIME_DELAY=60
-MAX_TIME_DELAY=600
+MIN_TIME_DELAY=30                        # Minimum seconds between trades (30s)
+MAX_TIME_DELAY=600                       # Maximum seconds between trades (10min)
 
 # Spread Configuration
-MIN_SPREAD=0.01
-TARGET_SPREAD=0.015
-MAX_SPREAD=0.02
+# MIN_SPREAD=0.01                          # Minimum acceptable price spread (1%)
+# TARGET_SPREAD=0.015                      # Target price spread for trades (1.5%)
+# MAX_SPREAD=0.02                          # Maximum acceptable price spread (2%)
 
 # Gas Configuration
-MAX_GAS_PRICE=500
-GAS_LIMIT=500000
+# MAX_GAS_PRICE=500                        # Maximum gas price in GWEI
+# GAS_LIMIT=500000                         # Gas limit for Arbitrum
 
 # SMTP Configuration
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your_email@gmail.com
 SMTP_PASS=your_app_password
+
+# Email addresses for alerts
+ALERT_FROM_EMAIL=your_email@gmail.com
+ALERT_TO_EMAIL=your_email@gmail.com
 
 # Master Wallet
 MASTER_WALLET_PRIVATE_KEY=your_private_key
@@ -96,11 +104,22 @@ MASTER_WALLET_PRIVATE_KEY=your_private_key
 UNISWAP_V3_ROUTER=0xE592427A0AEce92De3Edee1F18E0157C05861564
 UNISWAP_V3_FACTORY=0x1F98431c8aD98523631AE4a59f267346ea31F984
 UNISWAP_V3_QUOTER=0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6
-UNISWAP_POOL_FEE=3000
+UNISWAP_POOL_FEE=3000                                               # 0.3% fee tier
 
 # Token Addresses (Arbitrum Mainnet)
 MXTK_ADDRESS=0x3e4Ffeb394B371AAaa0998488046Ca19d870d9Ba
 USDT_ADDRESS=0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9
+
+# Slippage Settings
+MAX_SLIPPAGE=0.02                        # Maximum allowed slippage (2%)
+
+# USDT Trading Ranges (in USDT)
+MIN_USDT_TRADE=0.01                     # Minimum USDT trade amount
+MAX_USDT_TRADE=0.5                      # Maximum USDT trade amount
+
+# MXTK Trading Ranges (in MXTK)
+MIN_MXTK_TRADE=0.0001                    # Minimum MXTK trade amount
+MAX_MXTK_TRADE=0.002                     # Maximum MXTK trade amount
 ```
 
 ## Important Notes
