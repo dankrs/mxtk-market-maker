@@ -700,11 +700,26 @@ class MXTKMarketMaker {
             } else {
                 // Random direction for subsequent trades
                 const isUsdtToMxtk = Math.random() < 0.5;
-                tokenIn = isUsdtToMxtk ? this.USDT_ADDRESS : this.MXTK_ADDRESS;
-                tokenOut = isUsdtToMxtk ? this.MXTK_ADDRESS : this.USDT_ADDRESS;
-                tradeDirection = isUsdtToMxtk ? 'USDT_TO_MXTK' : 'MXTK_TO_USDT';
+                
+                // If previous trade was in the same direction, force opposite direction
+                if (this.lastTradeDirection === 'USDT_TO_MXTK' && isUsdtToMxtk) {
+                    tokenIn = this.MXTK_ADDRESS;
+                    tokenOut = this.USDT_ADDRESS;
+                    tradeDirection = 'MXTK_TO_USDT';
+                } else if (this.lastTradeDirection === 'MXTK_TO_USDT' && !isUsdtToMxtk) {
+                    tokenIn = this.USDT_ADDRESS;
+                    tokenOut = this.MXTK_ADDRESS;
+                    tradeDirection = 'USDT_TO_MXTK';
+                } else {
+                    tokenIn = isUsdtToMxtk ? this.USDT_ADDRESS : this.MXTK_ADDRESS;
+                    tokenOut = isUsdtToMxtk ? this.MXTK_ADDRESS : this.USDT_ADDRESS;
+                    tradeDirection = isUsdtToMxtk ? 'USDT_TO_MXTK' : 'MXTK_TO_USDT';
+                }
+                
                 availableBalance = isUsdtToMxtk ? usdtBalance : mxtkBalance;
-                this.tradingLog('trade', `Selected direction: ${tradeDirection}`);
+                this.tradingLog('trade', `Selected direction: ${tradeDirection}`, {
+                    reason: this.lastTradeDirection ? 'Random selection' : 'Forced opposite direction'
+                });
             }
 
             // Calculate maximum possible trade amount based on balance
@@ -738,20 +753,12 @@ class MXTKMarketMaker {
                     min: ethers.utils.formatUnits(minAmount, decimals),
                     max: ethers.utils.formatUnits(maxAmount, decimals),
                     selected: ethers.utils.formatUnits(randomAmount, decimals)
-                },
-                token: tokenIn === this.USDT_ADDRESS ? 'USDT' : 'MXTK'
+                }
             });
 
             // Verify pool exists and has liquidity before attempting swap
-            const fee = this.POOL_FEE;
-            const poolAddress = await this.verifyPool(tokenIn, tokenOut, fee);
+            const poolInfo = await this.verifyPool(tokenIn, tokenOut, this.POOL_FEE);
             
-            this.tradingLog('trade', 'Pool verified', {
-                poolAddress,
-                fee: `${fee/10000}%`,
-                direction: tradeDirection
-            });
-
             // Execute the swap
             await this.executeSwap(tokenIn, tokenOut, randomAmount);
 
@@ -760,7 +767,10 @@ class MXTKMarketMaker {
 
             // Generate random delay for next trade
             const delay = Math.floor(Math.random() * (this.MAX_DELAY - this.MIN_DELAY + 1) + this.MIN_DELAY);
-            this.tradingLog('system', `Next trade scheduled`, { delay: `${delay} seconds` });
+            this.tradingLog('system', `Next trade scheduled`, { 
+                delay: `${delay} seconds`,
+                nextTradeAt: new Date(Date.now() + delay * 1000).toISOString()
+            });
 
             this.tradingLog('system', '=== Random Trade Complete ===');
             return delay;
@@ -770,32 +780,16 @@ class MXTKMarketMaker {
                 timestamp: new Date().toISOString()
             });
             
-            // Get wallet state for error report
-            try {
-                const ethBalance = await this.masterWallet.getBalance();
-                const usdtBalance = await this.usdtContract.balanceOf(this.masterWallet.address);
-                const mxtkBalance = await this.mxtkContract.balanceOf(this.masterWallet.address);
-                
-                const errorDetails = {
-                    type: 'Trade Execution Error',
-                    message: error.message,
-                    stack: error.stack,
-                    additional: {
-                        balances: {
-                            ETH: ethers.utils.formatEther(ethBalance),
-                            USDT: ethers.utils.formatUnits(usdtBalance, 6),
-                            MXTK: ethers.utils.formatEther(mxtkBalance)
-                        }
-                    }
-                };
-
-                await this.sendErrorEmail('Trade Execution Failed', errorDetails);
-            } catch (emailError) {
-                this.tradingLog('system', '❌ Failed to send error notification', {
-                    originalError: error.message,
-                    emailError: emailError.message
-                });
-            }
+            // Send detailed error email
+            await this.sendErrorEmail('Trade Execution Failed', {
+                type: 'Trade Execution Error',
+                message: error.message,
+                stack: error.stack,
+                additional: {
+                    lastTradeDirection: this.lastTradeDirection,
+                    isFirstTrade: this.isFirstTrade
+                }
+            });
             
             throw error;
         }
